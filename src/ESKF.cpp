@@ -113,6 +113,48 @@ void ESKF::composeTrueState(){
 }
 
 
+// this function puts the errorstate into the nominal state. as per page 62
+void ESKF::injectObservedError(){
+    Matrix<float,19,1> newState;
+    // compose position
+    newState.block(0,0,3,1) = nominalState.block(0,0,3,1) + errorState.block(0,0,3,1);
+    // compose Velocity
+    newState.block(3,0,3,1) = nominalState.block(3,0,3,1) + errorState.block(3,0,3,1);
+
+    // compose Quaternion - probably this can be done in less lines.
+    Matrix<float,3,1>  angAxMat = errorState.block(6,0,3,1);
+    AngleAxisf AngAx(angAxMat.norm(),angAxMat.normalized());
+    Quaternionf qError(AngAx);
+    Matrix<float,4,1> qMat =  nominalState.block(6,0,4,1);
+    Quaternionf qNom(qMat);
+    newState.block(6,0,4,1) = (qNom*qError).coeffs();
+
+    //compose accelerometer drift
+    newState.block(10,0,3,1) = nominalState.block(10,0,3,1) + errorState.block(9,0,3,1);
+
+    //compose gyro drift.
+    newState.block(13,0,3,1) = nominalState.block(13,0,3,1) + errorState.block(12,0,3,1);
+
+    //compose gravity. (I don't think it changes anything.)
+    newState.block(16,0,3,1) = nominalState.block(16,0,3,1) + errorState.block(15,0,3,1);
+
+    //update the nominal state (I am doing a copy to be sure there is no aliasing problems etc)
+    nominalState = newState;
+}
+
+void ESKF::resetError(){
+    // set the errorState to zero
+    errorState.Zero();
+
+    // set up G matrix, can be simply an identity or with a more compicated term for the rotation section.
+    G.setIdentity();
+    Matrix<float,3,3> rotCorrection;
+    rotCorrection = - getSkew(0.5*errorState.block(6,0,3,1));
+    G.block(6,6,3,3) = (G.block(6,6,3,3) + rotCorrection).eval();
+
+}
+
+
 // this function is called when you have a reference to correct the error state, in this case a mocap system.
 void ESKF::observeErrorState(Vector3f pos, Quaternionf rot){
     Matrix<float,19,1> y;
@@ -157,6 +199,10 @@ void ESKF::observeErrorState(Vector3f pos, Quaternionf rot){
     Matrix<float,18,18> I18;
     I18 = I18.Identity();
     P = ((I18 - K*H)*P).eval();
+
+    injectObservedError();
+
+    resetError();
 
 
 

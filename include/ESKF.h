@@ -30,6 +30,8 @@ public:
     Matrix<float,3,3> AngAxToMat(Vector3f in);
     Matrix<float,19,1> measurementFunc(Matrix<float,19,1> in);
     void composeTrueState();
+    void injectObservedError();
+    void resetError();
 
     void predictionUpdate(Vector3f a, Vector3f omega, float delta_t);
 
