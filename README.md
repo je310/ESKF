@@ -10,7 +10,11 @@ This implementation is intended to run on an embedded device. In my case an STM3
 
 
 # Building 
+
 mkdir build 
+
 cd build 
+
 cmake .. 
+
 make -j8
