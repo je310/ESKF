@@ -19,7 +19,14 @@ ESKF::ESKF(){
 
 
 Matrix<float, 19,1> ESKF::makeState(Vector3f p,Vector3f v, Quaternionf q, Vector3f a_b, Vector3f omega_b,Vector3f g ){
-
+    Matrix<float,19,1> out;
+    out.block(0,0,3,1) = p;
+    out.block(3,0,3,1) = v;
+    out.block(6,0,4,1) = q.coeffs();
+    out.block(10,0,3,1) = a_b;
+    out.block(13,0,3,1) = omega_b;
+    out.block(15,0,3,1) = g;
+    return out;
 }
 
 void ESKF::updateStateIMU(Vector3f a, Vector3f omega, float delta_t){
@@ -53,7 +60,7 @@ Matrix<float,3,3> ESKF::AngAxToMat(Vector3f in){
 
 void ESKF::predictionUpdate(Vector3f a, Vector3f omega, float delta_t){
     // build F_x
-    Matrix<float, 3,3> I3 , I3dt;
+    static Matrix<float, 3,3> I3 , I3dt;
     F_x = F_x.Zero(18,18);
     //page 59
     I3 = I3.Identity();
@@ -67,7 +74,7 @@ void ESKF::predictionUpdate(Vector3f a, Vector3f omega, float delta_t){
     F_x.block(3,15,3,3) = I3dt;
     F_x.block(6,12,3,3) = -I3dt;
 
-    Matrix<float, 3,3> rotation;
+    static Matrix<float, 3,3> rotation;
     rotation = getRotationMatrixFromState(nominalState);
     F_x.block(3,9,3,3) = -rotation*delta_t;
 
@@ -81,18 +88,18 @@ void ESKF::predictionUpdate(Vector3f a, Vector3f omega, float delta_t){
     // build Q_i, this is only a diagonal matrix augmented by a scalar, so could be more efficient to for loop the relevant entries.
 
     Q_i.setZero();
-    Q_i.block(0,0,3,3) =  delta_t * delta_t * sig2_a_n  * I3 ;
-    Q_i.block(3,3,3,3) = I3 * sig2_omega_n * delta_t * delta_t;
-    Q_i.block(6,6,3,3) = I3 * sig2_a_w * delta_t;
-    Q_i.block(9,9,3,3) = I3 * sig2_omega_w * delta_t;
+    Q_i.block(0,0,3,3) =   sig2_a_n * delta_t * delta_t  * I3 ;
+    Q_i.block(3,3,3,3) =   sig2_omega_n * delta_t * delta_t *I3;
+    Q_i.block(6,6,3,3) =   sig2_a_w * delta_t*I3;
+    Q_i.block(9,9,3,3) =   sig2_omega_w * delta_t*I3;
 
-    //probably unnecessary copying here. Need to check if things are done inplace or otherwise. //.eval should fix this issue
+    //probably unnecessary copying here. Need to check if things are done inplace or otherwise. //.eval should fix this issue This is by far the most expensive line (roughly 30% cpu alocation on mbed)
      P = (F_x*P*F_x.transpose() + F_i*Q_i*F_i.transpose()).eval();
 
 
     //this line is apparently not needed, according to the document. // I suspect it only meant in the first iteration?????
-    //Matrix<float,18,18> errorState_new = F_x * errorState;
-    //errorState = errorState_new;
+     errorState=( F_x * errorState).eval();
+
 
 
 }
@@ -115,6 +122,11 @@ void ESKF::composeTrueState(){
 
 // this function puts the errorstate into the nominal state. as per page 62
 void ESKF::injectObservedError(){
+
+    nominalState = getTrueState();
+}
+
+Matrix<float,19,1> ESKF::getTrueState(){
     Matrix<float,19,1> newState;
     // compose position
     newState.block(0,0,3,1) = nominalState.block(0,0,3,1) + errorState.block(0,0,3,1);
@@ -137,9 +149,8 @@ void ESKF::injectObservedError(){
 
     //compose gravity. (I don't think it changes anything.)
     newState.block(16,0,3,1) = nominalState.block(16,0,3,1) + errorState.block(15,0,3,1);
+    return newState;
 
-    //update the nominal state (I am doing a copy to be sure there is no aliasing problems etc)
-    nominalState = newState;
 }
 
 void ESKF::resetError(){
@@ -151,6 +162,7 @@ void ESKF::resetError(){
     Matrix<float,3,3> rotCorrection;
     rotCorrection = - getSkew(0.5*errorState.block(6,0,3,1));
     G.block(6,6,3,3) = (G.block(6,6,3,3) + rotCorrection).eval();
+    P = (G * P * G.transpose()).eval();
 
 }
 
@@ -160,7 +172,7 @@ void ESKF::observeErrorState(Vector3f pos, Quaternionf rot){
     Matrix<float,19,1> y;
     y.Zero();
     y.block(0,0,3,1) = pos;
-    y.block(6,0,4,1) <<rot.x() , rot.y() , rot.z() , rot.w();
+    y.block(6,0,4,1) <<rot.coeffs();
 
     // setup X_dx, essensially an identity, with some quaternion stuff in the middle. Optimise by initilising everything elsewhere.
     X_dx.Zero();
@@ -184,13 +196,14 @@ void ESKF::observeErrorState(Vector3f pos, Quaternionf rot){
     the measurement function of the particular sensor used, and is not presented here.*/
 
     //I believe that if I am only providing position and a quaternion then the position part will be an identity, the quaternion part will be identity?
-
+    // I think I might need to use a gyro reading to compute the quaternion gradient?
     H_x = H_x.Identity();
 
     //compose the two halves of the hessian
     H = H_x*X_dx;
     Matrix<float,19,19> V; //  the covariance of the measurement function.
     V.Zero();
+
     K = P * H.transpose() * (H*P*H.transpose() + V).inverse();
 
     Matrix<float,18,1> d_x_hat;
@@ -198,7 +211,12 @@ void ESKF::observeErrorState(Vector3f pos, Quaternionf rot){
     d_x_hat = K *(y - measurementFunc(trueState));
     Matrix<float,18,18> I18;
     I18 = I18.Identity();
-    P = ((I18 - K*H)*P).eval();
+
+    // simple form
+    //P = ((I18 - K*H)*P).eval();
+    //Joseph form
+    Matrix<float,18,18> IKH = I18 - K*H;
+    P = (IKH * P  * IKH.transpose() + K * V * K.transpose() ).eval();
 
     injectObservedError();
 

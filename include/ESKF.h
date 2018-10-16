@@ -23,6 +23,9 @@ public:
 
     // Called when there is a new measurment from an absolute position reference (such as Motion Capture, GPS, map matching etc )
     void observeErrorState(Vector3f pos, Quaternionf rot);
+
+    //returns the combination of the nominal state and the error state.
+    Matrix<float,19,1> getTrueState();
 //private:
 
     Matrix<float, 3,3> getRotationMatrixFromState(Matrix<float, 19,1> state);
