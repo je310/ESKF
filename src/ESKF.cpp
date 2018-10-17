@@ -10,7 +10,7 @@ ESKF::ESKF(Matrix<float, 19,1> initialState, float sig2_a_n_, float sig2_omega_n
 
     //Build F_i,
     F_i.setZero();
-    F_i.block(3,0,12,12).setIdentity();
+    F_i.block<12,12>(3,0).setIdentity();
 }
 
 ESKF::ESKF(){
@@ -20,12 +20,12 @@ ESKF::ESKF(){
 
 Matrix<float, 19,1> ESKF::makeState(Vector3f p,Vector3f v, Quaternionf q, Vector3f a_b, Vector3f omega_b,Vector3f g ){
     Matrix<float,19,1> out;
-    out.block(0,0,3,1) = p;
-    out.block(3,0,3,1) = v;
-    out.block(6,0,4,1) = q.coeffs();
-    out.block(10,0,3,1) = a_b;
-    out.block(13,0,3,1) = omega_b;
-    out.block(15,0,3,1) = g;
+    out.block<3,1>(0,0) = p;
+    out.block<3,1>(3,0) = v;
+    out.block<4,1>(6,0) = q.coeffs();
+    out.block<3,1>(10,0) = a_b;
+    out.block<3,1>(13,0) = omega_b;
+    out.block<3,1>(15,0) = g;
     return out;
 }
 
@@ -35,7 +35,7 @@ void ESKF::updateStateIMU(Vector3f a, Vector3f omega, float delta_t){
 }
 
 Matrix<float, 3,3> ESKF::getRotationMatrixFromState(Matrix<float, 19,1> state){
-    Matrix<float,4,1> mat = state.block(6,0,4,1);
+    Matrix<float,4,1> mat = state.block<4,1>(6,0);
     Quaternionf quat(mat);
     return quat.matrix();
 }
@@ -65,33 +65,33 @@ void ESKF::predictionUpdate(Vector3f a, Vector3f omega, float delta_t){
     //page 59
     I3 = I3.Identity();
     I3dt = delta_t * I3;
-    F_x.block(0,0,3,3) = I3;
-    F_x.block(3,3,3,3) = I3;
-    F_x.block(9,9,3,3) = I3;
-    F_x.block(12,12,3,3) = I3;
-    F_x.block(15,15,3,3) = I3;
-    F_x.block(0,3,3,3) = I3dt;
-    F_x.block(3,15,3,3) = I3dt;
-    F_x.block(6,12,3,3) = -I3dt;
+    F_x.block<3,3>(0,0) = I3;
+    F_x.block<3,3>(3,3) = I3;
+    F_x.block<3,3>(9,9) = I3;
+    F_x.block<3,3>(12,12) = I3;
+    F_x.block<3,3>(15,15) = I3;
+    F_x.block<3,3>(0,3) = I3dt;
+    F_x.block<3,3>(3,15) = I3dt;
+    F_x.block<3,3>(6,12) = -I3dt;
 
     static Matrix<float, 3,3> rotation;
     rotation = getRotationMatrixFromState(nominalState);
-    F_x.block(3,9,3,3) = -rotation*delta_t;
+    F_x.block<3,3>(3,9) = -rotation*delta_t;
 
     // for the 2nd row and 3rd column
-    F_x.block(3,6,3,3) = - rotation * getSkew(a - nominalState.block(9,0,3,1)) * delta_t;
+    F_x.block<3,3>(3,6) = - rotation * getSkew(a - nominalState.block(9,0,3,1)) * delta_t;
 
     // for the 3rd row 3rd column
-    F_x.block(6,6,3,3) = AngAxToMat((omega - nominalState.block(12,0,3,1))*delta_t).transpose();
+    F_x.block<3,3>(6,6) = AngAxToMat((omega - nominalState.block(12,0,3,1))*delta_t).transpose();
 
 
     // build Q_i, this is only a diagonal matrix augmented by a scalar, so could be more efficient to for loop the relevant entries.
 
     Q_i.setZero();
-    Q_i.block(0,0,3,3) =   sig2_a_n * delta_t * delta_t  * I3 ;
-    Q_i.block(3,3,3,3) =   sig2_omega_n * delta_t * delta_t *I3;
-    Q_i.block(6,6,3,3) =   sig2_a_w * delta_t*I3;
-    Q_i.block(9,9,3,3) =   sig2_omega_w * delta_t*I3;
+    Q_i.block<3,3>(0,0) =   sig2_a_n * delta_t * delta_t  * I3 ;
+    Q_i.block<3,3>(3,3) =   sig2_omega_n * delta_t * delta_t *I3;
+    Q_i.block<3,3>(6,6) =   sig2_a_w * delta_t*I3;
+    Q_i.block<3,3>(9,9) =   sig2_omega_w * delta_t*I3;
 
     //probably unnecessary copying here. Need to check if things are done inplace or otherwise. //.eval should fix this issue This is by far the most expensive line (roughly 30% cpu alocation on mbed)
      P = (F_x*P*F_x.transpose() + F_i*Q_i*F_i.transpose()).eval();
@@ -129,26 +129,26 @@ void ESKF::injectObservedError(){
 Matrix<float,19,1> ESKF::getTrueState(){
     Matrix<float,19,1> newState;
     // compose position
-    newState.block(0,0,3,1) = nominalState.block(0,0,3,1) + errorState.block(0,0,3,1);
+    newState.block<3,1>(0,0) = nominalState.block<3,1>(0,0) + errorState.block<3,1>(0,0);
     // compose Velocity
-    newState.block(3,0,3,1) = nominalState.block(3,0,3,1) + errorState.block(3,0,3,1);
+    newState.block<3,1>(3,0) = nominalState.block<3,1>(3,0) + errorState.block<3,1>(3,0);
 
     // compose Quaternion - probably this can be done in less lines.
-    Matrix<float,3,1>  angAxMat = errorState.block(6,0,3,1);
+    Matrix<float,3,1>  angAxMat = errorState.block<3,1>(6,0);
     AngleAxisf AngAx(angAxMat.norm(),angAxMat.normalized());
     Quaternionf qError(AngAx);
-    Matrix<float,4,1> qMat =  nominalState.block(6,0,4,1);
+    Matrix<float,4,1> qMat =  nominalState.block<4,1>(6,0);
     Quaternionf qNom(qMat);
-    newState.block(6,0,4,1) = (qNom*qError).coeffs();
+    newState.block<4,1>(6,0) = (qNom*qError).coeffs();
 
     //compose accelerometer drift
-    newState.block(10,0,3,1) = nominalState.block(10,0,3,1) + errorState.block(9,0,3,1);
+    newState.block<3,1>(10,0) = nominalState.block<3,1>(10,0) + errorState.block<3,1>(9,0);
 
     //compose gyro drift.
-    newState.block(13,0,3,1) = nominalState.block(13,0,3,1) + errorState.block(12,0,3,1);
+    newState.block<3,1>(13,0) = nominalState.block<3,1>(13,0) + errorState.block<3,1>(12,0);
 
     //compose gravity. (I don't think it changes anything.)
-    newState.block(16,0,3,1) = nominalState.block(16,0,3,1) + errorState.block(15,0,3,1);
+    newState.block<3,1>(16,0) = nominalState.block<3,1>(16,0) + errorState.block<3,1>(15,0);
     return newState;
 
 }
@@ -160,8 +160,8 @@ void ESKF::resetError(){
     // set up G matrix, can be simply an identity or with a more compicated term for the rotation section.
     G.setIdentity();
     Matrix<float,3,3> rotCorrection;
-    rotCorrection = - getSkew(0.5*errorState.block(6,0,3,1));
-    G.block(6,6,3,3) = (G.block(6,6,3,3) + rotCorrection).eval();
+    rotCorrection = - getSkew(0.5*errorState.block<3,1>(6,0));
+    G.block<3,3>(6,6) = (G.block<3,3>(6,6) + rotCorrection).eval();
     P = (G * P * G.transpose()).eval();
 
 }
@@ -171,8 +171,8 @@ void ESKF::resetError(){
 void ESKF::observeErrorState(Vector3f pos, Quaternionf rot){
     Matrix<float,19,1> y;
     y.Zero();
-    y.block(0,0,3,1) = pos;
-    y.block(6,0,4,1) <<rot.coeffs();
+    y.block<3,1>(0,0) = pos;
+    y.block<4,1>(6,0) <<rot.coeffs();
 
     // setup X_dx, essensially an identity, with some quaternion stuff in the middle. Optimise by initilising everything elsewhere.
     X_dx.Zero();
@@ -180,11 +180,11 @@ void ESKF::observeErrorState(Vector3f pos, Quaternionf rot){
     I6 = I6.Identity();
     Matrix<float,9,9> I9;
     I9 = I9.Identity();
-    X_dx.block(0,0,6,6) = I6;
-    X_dx.block(10,9,9,9) = I9;
-    Matrix<float,4,1> q(nominalState.block(6,0,4,1)); // getting quaternion, though in a mat, so we can divide by 2.
+    X_dx.block<6,6>(0,0) = I6;
+    X_dx.block<9,9>(10,9) = I9;
+    Matrix<float,4,1> q(nominalState.block<4,1>(6,0)); // getting quaternion, though in a mat, so we can divide by 2.
     q = q/2;
-    X_dx.block(6,6,4,3) <<   -q.x() , -q.y() , -q.z(),
+    X_dx.block<4,3>(6,6) <<   -q.x() , -q.y() , -q.z(),
                               q.w() , -q.z() ,  q.y(),
                               q.z() ,  q.w() , -q.x(),
                              -q.y() ,  q.x() ,  q.w();
