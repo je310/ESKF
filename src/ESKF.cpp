@@ -3,15 +3,14 @@
 using namespace Eigen;
 using namespace std;
 
-ESKF::ESKF(float delta_t, const Matrix<float, STATE_SIZE, 1>& initialState,
+ESKF::ESKF(float delta_t, Vector3f a_gravity,
+        const Matrix<float, STATE_SIZE, 1>& initialState,
         const Matrix<float, dSTATE_SIZE, dSTATE_SIZE>& initalP,
         float var_a_n, float var_omega_n, float var_a_w, float var_omega_w)
-        : dt_(delta_t),
+        : dt_(delta_t), a_gravity_(a_gravity),
         nominalState_(initialState),
         P_(initalP) {
     
-    //TODO init P!
-
     // Jacobian of the state transition: page 59, eqn 269
     // Precompute constant part only
     F_x_.setZero();
@@ -20,15 +19,12 @@ ESKF::ESKF(float delta_t, const Matrix<float, STATE_SIZE, 1>& initialState,
     F_x_.block<3, 3>(dPOS_IDX, dVEL_IDX) = I_3 * dt_;
     // dVel row
     F_x_.block<3, 3>(dVEL_IDX, dVEL_IDX) = I_3;
-    F_x_.block<3, 3>(dVEL_IDX, dGRAV_IDX) = I_3 * dt_;
     // dTheta row
     F_x_.block<3, 3>(dTHETA_IDX, dGB_IDX) = -I_3 * dt_;
     // dGyroBias row
     F_x_.block<3, 3>(dAB_IDX, dAB_IDX) = I_3;
     // dAccelBias row
     F_x_.block<3, 3>(dGB_IDX, dGB_IDX) = I_3;
-    // dGravity row
-    F_x_.block<3, 3>(dGRAV_IDX, dGRAV_IDX) = I_3;
 
     // Precompute Q
     Q_diag_ <<
@@ -44,10 +40,9 @@ Matrix<float, STATE_SIZE, 1> ESKF::makeState(
             const Vector3f& v,
             const Quaternionf& q,
             const Vector3f& a_b,
-            const Vector3f& omega_b,
-            const Vector3f& g) {
+            const Vector3f& omega_b) {
     Matrix<float, STATE_SIZE, 1> out;
-    out << p, v, quatToHamilton(q).normalized(), a_b, omega_b, g;
+    out << p, v, quatToHamilton(q).normalized(), a_b, omega_b;
     return out;
 }
 
@@ -56,8 +51,7 @@ Matrix<float, dSTATE_SIZE, dSTATE_SIZE> ESKF::makeP(
         const Matrix3f& cov_vel,
         const Matrix3f& cov_dtheta,
         const Matrix3f& cov_a_b,
-        const Matrix3f& cov_omega_b,
-        const Matrix3f& cov_g) {
+        const Matrix3f& cov_omega_b) {
     Matrix<float, dSTATE_SIZE, dSTATE_SIZE> P;
     P.setZero();
     P.block<3, 3>(dPOS_IDX, dPOS_IDX) = cov_pos;
@@ -65,7 +59,6 @@ Matrix<float, dSTATE_SIZE, dSTATE_SIZE> ESKF::makeP(
     P.block<3, 3>(dTHETA_IDX, dTHETA_IDX) = cov_dtheta;
     P.block<3, 3>(dAB_IDX, dAB_IDX) = cov_a_b;
     P.block<3, 3>(dGB_IDX, dGB_IDX) = cov_omega_b;
-    P.block<3, 3>(dGRAV_IDX, dGRAV_IDX) = cov_g;
     return P;
 }
 
@@ -127,9 +120,9 @@ void ESKF::predictIMU(const Vector3f& a_m, const Vector3f& omega_m) {
     Matrix3f R_theta = q_theta.toRotationMatrix();
 
     // Nominal state kinematics (eqn 259, pg 58)
-    Vector3f delta_pos = getVel()*dt_ + 0.5f*(acc_global + getGravity())*dt_*dt_;
+    Vector3f delta_pos = getVel()*dt_ + 0.5f*(acc_global + a_gravity_)*dt_*dt_;
     nominalState_.block<3, 1>(POS_IDX, 0) += delta_pos;
-    nominalState_.block<3, 1>(VEL_IDX, 0) += (acc_global + getGravity())*dt_;
+    nominalState_.block<3, 1>(VEL_IDX, 0) += (acc_global + a_gravity_)*dt_;
     nominalState_.block<4, 1>(QUAT_IDX, 0) = quatToHamilton(getQuat()*q_theta).normalized();
 
     // Jacobian of the state transition (eqn 269, page 59)
@@ -220,7 +213,6 @@ void ESKF::injectErrorState(const Matrix<float, dSTATE_SIZE, 1>& error_state) {\
     nominalState_.block<4, 1>(QUAT_IDX, 0) = quatToHamilton(getQuat()*q_dtheta).normalized();
     nominalState_.block<3, 1>(AB_IDX, 0) += error_state.block<3, 1>(dAB_IDX, 0);
     nominalState_.block<3, 1>(GB_IDX, 0) += error_state.block<3, 1>(dGB_IDX, 0);
-    nominalState_.block<3, 1>(GRAV_IDX, 0) += error_state.block<3, 1>(dGRAV_IDX, 0);
 
     // Reflect this tranformation in the P matrix, aka ESKF Reset
     // Note that the document suggests that this step is optional

@@ -5,7 +5,6 @@
 #include <Geometry.h>
 #include <iostream>
 
-#define GRAVITY 	9.812  // London g value.
 #define SUPPORT_STDIOSTREAM
 
 #define POS_IDX (0)
@@ -13,16 +12,14 @@
 #define QUAT_IDX (VEL_IDX + 3)
 #define AB_IDX (QUAT_IDX + 4)
 #define GB_IDX (AB_IDX + 3)
-#define GRAV_IDX (GB_IDX + 3)
-#define STATE_SIZE (GRAV_IDX + 3)
+#define STATE_SIZE (GB_IDX + 3)
 
 #define dPOS_IDX (0)
 #define dVEL_IDX (dPOS_IDX + 3)
 #define dTHETA_IDX (dVEL_IDX + 3)
 #define dAB_IDX (dTHETA_IDX + 3)
 #define dGB_IDX (dAB_IDX + 3)
-#define dGRAV_IDX (dGB_IDX + 3)
-#define dSTATE_SIZE (dGRAV_IDX + 3)
+#define dSTATE_SIZE (dGB_IDX + 3)
 
 #define I_3 (Eigen::Matrix3f::Identity())
 #define I_dx (Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>::Identity())
@@ -32,7 +29,8 @@ class ESKF {
 public:
     ESKF() {};
     // takes as input the  variance of the acceleration and gyro, where _n is the measurement noise, and _w is the pertibations of the system.
-    ESKF(float delta_t, const Eigen::Matrix<float, STATE_SIZE, 1>& initialState,
+    ESKF(float delta_t, Eigen::Vector3f a_gravity,
+            const Eigen::Matrix<float, STATE_SIZE, 1>& initialState,
             const Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>& initalP,
             float sig2_a_n, float sig2_omega_n, float sig2_a_w, float sig2_omega_w);
     // Concatenates relevant vectors to one large vector.
@@ -41,16 +39,14 @@ public:
             const Eigen::Vector3f& v,
             const Eigen::Quaternionf& q,
             const Eigen::Vector3f& a_b,
-            const Eigen::Vector3f& omega_b,
-            const Eigen::Vector3f& g);
+            const Eigen::Vector3f& omega_b);
 
     static Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE> makeP(
         const Eigen::Matrix3f& cov_pos,
         const Eigen::Matrix3f& cov_vel,
         const Eigen::Matrix3f& cov_dtheta,
         const Eigen::Matrix3f& cov_a_b,
-        const Eigen::Matrix3f& cov_omega_b,
-        const Eigen::Matrix3f& cov_g);
+        const Eigen::Matrix3f& cov_omega_b);
 
     // The quaternion convention in the document is "Hamilton" convention.
     // Eigen has a different order of components, so we need conversion
@@ -68,7 +64,6 @@ public:
     inline Eigen::Quaternionf getQuat() { return quatFromHamilton(getQuatVector()); }
     inline Eigen::Vector3f getAccelBias() { return nominalState_.block<3, 1>(AB_IDX, 0); }
     inline Eigen::Vector3f getGyroBias() { return nominalState_.block<3, 1>(GB_IDX, 0); }
-    inline Eigen::Vector3f getGravity() { return nominalState_.block<3, 1>(GRAV_IDX, 0); }
 
     // Called when there is a new measurment from the IMU.
     void predictIMU(const Eigen::Vector3f& a_m, const Eigen::Vector3f& omega_m);
@@ -102,13 +97,15 @@ private:
         const Eigen::Matrix<float, 3, dSTATE_SIZE>& H);
     void injectErrorState(const Eigen::Matrix<float, dSTATE_SIZE, 1>& error_state);
 
+    // We assume a fixed dt, so we can precompute matrices
+    float dt_;
+    // Acceleration due to gravity in global frame
+    Eigen::Vector3f a_gravity_; // [m/s^2] 
     // State vector of the filter
     Eigen::Matrix<float, STATE_SIZE, 1> nominalState_;
     // Covariance of the (error) state
     Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE> P_;
 
-    // We assume a fixed dt, so we can precompute many matrices
-    float dt_;
     // Process noise, stored as a vector of the diagonal
     Eigen::Matrix<float, 4*3, 1> Q_diag_;
     // Jacobian of the state transition: page 59, eqn 269

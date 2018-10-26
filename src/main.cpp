@@ -3,6 +3,7 @@
 #include <chrono>
 
 #define SQ(x) (x*x)
+#define GRAVITY 	9.812  // London g value.
 
 using namespace Eigen;
 using namespace std;
@@ -19,29 +20,26 @@ int main(int argc, char** argv) {
     float sigma_init_dtheta = 1.0; // [rad]
     float sigma_init_accel_bias = 1.0; // [m/s^2]
     float sigma_init_gyro_bias = 1.0; // [rad/s]
-    float sigma_init_gravity = 10; // kill me now
 
     float sigma_mocap_pos = 0.01; // [m]
     float sigma_mocap_rot = 0.1; // [rad]
 
     ESKF eskf(
             0.001f, // delta_t
+            Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
             ESKF::makeState(
                 Vector3f(0, 0, 0), // init pos
                 Vector3f(0, 0, 0), // init vel
                 Quaternionf(AngleAxisf(0.5f, Vector3f(1, 0, 0))), // init quaternion
                 Vector3f(0, 0, 0), // init accel bias
-                Vector3f(0, 0, 0), // init gyro bias
-                // Vector3f(0, 0, -GRAVITY) // init gravity
-                Vector3f(0, 0, 0) // init gravity
+                Vector3f(0, 0, 0) // init gyro bias
             ),
             ESKF::makeP(
                 SQ(sigma_init_pos) * I_3,
                 SQ(sigma_init_vel) * I_3,
                 SQ(sigma_init_dtheta) * I_3,
                 SQ(sigma_init_accel_bias) * I_3,
-                SQ(sigma_init_gyro_bias) * I_3,
-                SQ(sigma_init_gravity) * I_3
+                SQ(sigma_init_gyro_bias) * I_3
             ),
             SQ(sigma_accel),
             SQ(sigma_gyro),
@@ -56,6 +54,7 @@ int main(int argc, char** argv) {
         // Simulated static true pos/orientation
         Vector3f pos_true = Vector3f(0, 0, 0);
         Quaternionf q_true = Quaternionf(AngleAxisf(0.0f, Vector3f(1, 0, 0)));
+        // Quaternionf q_true = Quaternionf(AngleAxisf(0.001f*ms, Vector3f(1, 0, 0)));
         Matrix3f R_true = q_true.toRotationMatrix();
 
         // Fake accel/gyro
@@ -84,6 +83,5 @@ int main(int argc, char** argv) {
     std::cout << "QuatVector: " << std::endl << eskf.getQuatVector() << std::endl;
     std::cout << "AccelBias: " << std::endl << eskf.getAccelBias() << std::endl;
     std::cout << "GyroBias: " << std::endl << eskf.getGyroBias() << std::endl;
-    std::cout << "Gravity: " << std::endl << eskf.getGravity() << std::endl;
 
 }
