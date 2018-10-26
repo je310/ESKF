@@ -26,7 +26,7 @@ int main(int argc, char** argv){
 
     //timing some key things just for some insight. Accell is 1000hz and mocap is 100hz.
     auto start = std::chrono::system_clock::now();
-    for(int i = 0; i < 2000; i ++){
+    for(int i = 0; i < 10000; i ++){
         // we will have about 10 accel/gyro measurements per motion capture input.
         for(int f = 0; f < 10; f ++){
             //input our accel/gyro into the system

@@ -94,11 +94,11 @@ void ESKF::predictionUpdate(Vector3f a, Vector3f omega, float delta_t){
     Q_i.block<3,3>(9,9) =   sig2_omega_w * delta_t*I3;
 
     //probably unnecessary copying here. Need to check if things are done inplace or otherwise. //.eval should fix this issue This is by far the most expensive line (roughly 30% cpu alocation on mbed)
-     P = (F_x*P*F_x.transpose() + F_i*Q_i*F_i.transpose()).eval();
+	P = F_x*P*F_x.transpose() + F_i*Q_i*F_i.transpose();
 
 
     //this line is apparently not needed, according to the document. // I suspect it only meant in the first iteration?????
-     errorState=( F_x * errorState).eval();
+	errorState = F_x * errorState;
 
 
 
@@ -161,8 +161,8 @@ void ESKF::resetError(){
     G.setIdentity();
     Matrix<float,3,3> rotCorrection;
     rotCorrection = - getSkew(0.5*errorState.block<3,1>(6,0));
-    G.block<3,3>(6,6) = (G.block<3,3>(6,6) + rotCorrection).eval();
-    P = (G * P * G.transpose()).eval();
+	G.block<3, 3>(6, 6) = G.block<3, 3>(6, 6) + rotCorrection;
+	P = G * P * G.transpose();
 
 }
 
@@ -213,10 +213,10 @@ void ESKF::observeErrorState(Vector3f pos, Quaternionf rot){
     I18 = I18.Identity();
 
     // simple form
-    //P = ((I18 - K*H)*P).eval();
+    //P = (I18 - K*H)*P;
     //Joseph form
     Matrix<float,18,18> IKH = I18 - K*H;
-    P = (IKH * P  * IKH.transpose() + K * V * K.transpose() ).eval();
+    P = IKH*P*IKH.transpose() + K*V*K.transpose();
 
     injectObservedError();
 
