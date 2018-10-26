@@ -1,3 +1,6 @@
+
+// Malloc is really bad on embedded platform
+#define EIGEN_NO_MALLOC
 #include <Core.h>
 #include <Geometry.h>
 #include <iostream>
@@ -27,6 +30,7 @@
 //the main ESKF class
 class ESKF {
 public:
+    ESKF() {};
     // takes as input the  variance of the acceleration and gyro, where _n is the measurement noise, and _w is the pertibations of the system.
     ESKF(float delta_t, const Eigen::Matrix<float, STATE_SIZE, 1>& initialState,
             const Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>& initalP,
@@ -104,7 +108,7 @@ private:
     Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE> P_;
 
     // We assume a fixed dt, so we can precompute many matrices
-    const float dt_;
+    float dt_;
     // Process noise, stored as a vector of the diagonal
     Eigen::Matrix<float, 4*3, 1> Q_diag_;
     // Jacobian of the state transition: page 59, eqn 269
