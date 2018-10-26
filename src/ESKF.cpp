@@ -1,7 +1,10 @@
 #include <ESKF.h>
 
+using namespace Eigen;
+using namespace std;
 
-ESKF::ESKF(Matrix<float, 19, 1> initialState, float sig2_a_n_, float sig2_omega_n_, float sig2_a_w_, float sig2_omega_w_) {
+ESKF::ESKF(Matrix<float, STATE_SIZE, 1> initialState, 
+        float sig2_a_n_, float sig2_omega_n_, float sig2_a_w_, float sig2_omega_w_) {
     trueState = initialState;
     sig2_a_n = sig2_a_n_;
     sig2_omega_n = sig2_omega_n_;
@@ -13,42 +16,28 @@ ESKF::ESKF(Matrix<float, 19, 1> initialState, float sig2_a_n_, float sig2_omega_
     F_i.block<12, 12>(3, 0).setIdentity();
 }
 
-ESKF::ESKF() {
-
-}
-
-
-Matrix<float, 19, 1> ESKF::makeState(Vector3f p, Vector3f v, Quaternionf q, Vector3f a_b, Vector3f omega_b, Vector3f g) {
-    Matrix<float, 19, 1> out;
-    out.block<3, 1>(0, 0) = p;
-    out.block<3, 1>(3, 0) = v;
-    out.block<4, 1>(6, 0) = q.coeffs();
-    out.block<3, 1>(10, 0) = a_b;
-    out.block<3, 1>(13, 0) = omega_b;
-    out.block<3, 1>(15, 0) = g;
+Matrix<float, STATE_SIZE, 1> ESKF::makeState(Vector3f p, Vector3f v, Quaternionf q, 
+            Vector3f a_b, Vector3f omega_b, Vector3f g) {
+    Matrix<float, STATE_SIZE, 1> out;
+    out << p, v, q.coeffs(), a_b, omega_b, g;
     return out;
 }
 
-void ESKF::updateStateIMU(Vector3f a, Vector3f omega, float delta_t) {
-
-
-}
-
-Matrix<float, 3, 3> ESKF::getRotationMatrixFromState(Matrix<float, 19, 1> state) {
+Matrix3f ESKF::getRotationMatrixFromState(Matrix<float, STATE_SIZE, 1> state) {
     Matrix<float, 4, 1> mat = state.block<4, 1>(6, 0);
     Quaternionf quat(mat);
     return quat.matrix();
 }
 
-Matrix<float, 3, 3> ESKF::getSkew(Vector3f in) {
-    Matrix<float, 3, 3> out;
+Matrix3f ESKF::getSkew(Vector3f in) {
+    Matrix3f out;
     out << 0, -in(2), in(1),
         in(2), 0, -in(0),
         -in(1), in(0), 0;
     return out;
 }
 
-Matrix<float, 3, 3> ESKF::AngAxToMat(Vector3f in) {
+Matrix3f ESKF::rotVecToMat(Vector3f in) {
     float angle = in.norm();
     Vector3f axis = in.normalized();
     if (angle == 0) axis = Vector3f(1, 0, 0);
@@ -58,43 +47,45 @@ Matrix<float, 3, 3> ESKF::AngAxToMat(Vector3f in) {
     return angAx.toRotationMatrix();
 }
 
-void ESKF::predictionUpdate(Vector3f a, Vector3f omega, float delta_t) {
-    // build F_x
-    static Matrix<float, 3, 3> I3, I3dt;
-    F_x = F_x.Zero(18, 18);
-    //page 59
-    I3 = I3.Identity();
-    I3dt = delta_t * I3;
-    F_x.block<3, 3>(0, 0) = I3;
-    F_x.block<3, 3>(3, 3) = I3;
-    F_x.block<3, 3>(9, 9) = I3;
-    F_x.block<3, 3>(12, 12) = I3;
-    F_x.block<3, 3>(15, 15) = I3;
-    F_x.block<3, 3>(0, 3) = I3dt;
-    F_x.block<3, 3>(3, 15) = I3dt;
-    F_x.block<3, 3>(6, 12) = -I3dt;
+void ESKF::predictIMU(Vector3f a, Vector3f omega, float delta_t) {
+    // Build F_x
+    Matrix<float, dSTATE_SIZE, dSTATE_SIZE> F_x;
+    F_x.setZero();
+    Matrix3f rotation = getRotationMatrixFromState(nominalState);
+    
+    // page 59, eqn 269
+    // dPos row
+    F_x.block<3, 3>(dPOS_IDX, dPOS_IDX) = I_3;
+    F_x.block<3, 3>(dPOS_IDX, dVEL_IDX) = I_3 * delta_t;
+    // dVel row
+    F_x.block<3, 3>(dVEL_IDX, dVEL_IDX) = I_3;
+    F_x.block<3, 3>(dVEL_IDX, dTHETA_IDX) = 
+            -rotation * getSkew(a - nominalState.block<3, 1>(AB_IDX, 0)) * delta_t;
+    F_x.block<3, 3>(dVEL_IDX, dAB_IDX) = -rotation * delta_t;
+    F_x.block<3, 3>(dVEL_IDX, dGRAV_IDX) = I_3 * delta_t;
+    // dTheta row
+    Vector3f delta_theta = (omega - nominalState.block<3, 1>(GB_IDX, 0))*delta_t;
+    F_x.block<3, 3>(dTHETA_IDX, dTHETA_IDX) = rotVecToMat(delta_theta).transpose();
+    F_x.block<3, 3>(dTHETA_IDX, dGB_IDX) = -I_3 * delta_t;
+    // dGyroBias row
+    F_x.block<3, 3>(dAB_IDX, dAB_IDX) = I_3;
+    // dAccelBias row
+    F_x.block<3, 3>(dGB_IDX, dGB_IDX) = I_3;
+    // dGravity row
+    F_x.block<3, 3>(dGRAV_IDX, dGRAV_IDX) = I_3;
 
-    static Matrix<float, 3, 3> rotation;
-    rotation = getRotationMatrixFromState(nominalState);
-    F_x.block<3, 3>(3, 9) = -rotation * delta_t;
-
-    // for the 2nd row and 3rd column
-    F_x.block<3, 3>(3, 6) = -rotation * getSkew(a - nominalState.block(9, 0, 3, 1)) * delta_t;
-
-    // for the 3rd row 3rd column
-    F_x.block<3, 3>(6, 6) = AngAxToMat((omega - nominalState.block(12, 0, 3, 1))*delta_t).transpose();
 
 
     // build Q_i, this is only a diagonal matrix augmented by a scalar, so could be more efficient to for loop the relevant entries.
 
     Q_i.setZero();
-    Q_i.block<3, 3>(0, 0) = sig2_a_n * delta_t * delta_t  * I3;
-    Q_i.block<3, 3>(3, 3) = sig2_omega_n * delta_t * delta_t *I3;
-    Q_i.block<3, 3>(6, 6) = sig2_a_w * delta_t*I3;
-    Q_i.block<3, 3>(9, 9) = sig2_omega_w * delta_t*I3;
+    Q_i.block<3, 3>(0, 0) = sig2_a_n*delta_t*delta_t * I_3;
+    Q_i.block<3, 3>(3, 3) = sig2_omega_n*delta_t*delta_t * I_3;
+    Q_i.block<3, 3>(6, 6) = sig2_a_w*delta_t * I_3;
+    Q_i.block<3, 3>(9, 9) = sig2_omega_w*delta_t * I_3;
 
     //probably unnecessary copying here. Need to check if things are done inplace or otherwise. //.eval should fix this issue This is by far the most expensive line (roughly 30% cpu alocation on mbed)
-    P = F_x * P*F_x.transpose() + F_i * Q_i*F_i.transpose();
+    P = F_x*P*F_x.transpose() + F_i*Q_i*F_i.transpose();
 
 
     //this line is apparently not needed, according to the document. // I suspect it only meant in the first iteration?????
@@ -104,8 +95,8 @@ void ESKF::predictionUpdate(Vector3f a, Vector3f omega, float delta_t) {
 
 }
 
-Matrix<float, 19, 1> ESKF::measurementFunc(Matrix<float, 19, 1> in) {
-    Matrix<float, 19, 1> func;
+Matrix<float, STATE_SIZE, 1> ESKF::measurementFunc(Matrix<float, STATE_SIZE, 1> in) {
+    Matrix<float, STATE_SIZE, 1> func;
     func <<
         1, 1, 1,
         0, 0, 0,
@@ -127,8 +118,8 @@ void ESKF::injectObservedError() {
     nominalState = getTrueState();
 }
 
-Matrix<float, 19, 1> ESKF::getTrueState() {
-    Matrix<float, 19, 1> newState;
+Matrix<float, STATE_SIZE, 1> ESKF::getTrueState() {
+    Matrix<float, STATE_SIZE, 1> newState;
     // compose position
     newState.block<3, 1>(0, 0) = nominalState.block<3, 1>(0, 0) + errorState.block<3, 1>(0, 0);
     // compose Velocity
@@ -160,7 +151,7 @@ void ESKF::resetError() {
 
     // set up G matrix, can be simply an identity or with a more compicated term for the rotation section.
     G.setIdentity();
-    Matrix<float, 3, 3> rotCorrection;
+    Matrix3f rotCorrection;
     rotCorrection = -getSkew(0.5*errorState.block<3, 1>(6, 0));
     G.block<3, 3>(6, 6) = G.block<3, 3>(6, 6) + rotCorrection;
     P = G * P * G.transpose();
@@ -170,7 +161,7 @@ void ESKF::resetError() {
 
 // this function is called when you have a reference to correct the error state, in this case a mocap system.
 void ESKF::observeErrorState(Vector3f pos, Quaternionf rot) {
-    Matrix<float, 19, 1> y;
+    Matrix<float, STATE_SIZE, 1> y;
     y.Zero();
     y.block<3, 1>(0, 0) = pos;
     y.block<4, 1>(6, 0) << rot.coeffs();
@@ -203,21 +194,21 @@ void ESKF::observeErrorState(Vector3f pos, Quaternionf rot) {
 
     //compose the two halves of the hessian
     H = H_x * X_dx;
-    Matrix<float, 19, 19> V; //  the covariance of the measurement function.
+    Matrix<float, STATE_SIZE, STATE_SIZE> V; //  the covariance of the measurement function.
     V.Zero();
 
     K = P * H.transpose() * (H*P*H.transpose() + V).inverse();
 
-    Matrix<float, 18, 1> d_x_hat;
+    Matrix<float, dSTATE_SIZE, 1> d_x_hat;
     composeTrueState();
     d_x_hat = K * (y - measurementFunc(trueState));
-    Matrix<float, 18, 18> I18;
+    Matrix<float, dSTATE_SIZE, dSTATE_SIZE> I18;
     I18 = I18.Identity();
 
     // simple form
     //P = (I18 - K*H)*P;
     //Joseph form
-    Matrix<float, 18, 18> IKH = I18 - K * H;
+    Matrix<float, dSTATE_SIZE, dSTATE_SIZE> IKH = I18 - K * H;
     P = IKH * P*IKH.transpose() + K * V*K.transpose();
 
     injectObservedError();
