@@ -16,7 +16,7 @@ int main(int argc, char** argv) {
     Matrix<float, STATE_SIZE, 1> initState = ESKF::makeState(
         Vector3f(0, 0, 0),
         Vector3f(0, 0, 0),
-        Quaternionf(1, 0, 0, 0),
+        ESKF::quatFromHamilton(Vector4f(1, 0, 0, 0)),
         Vector3f(0, 0, 0),
         Vector3f(0, 0, 0),
         // Vector3f(0, 0, -GRAVITY));

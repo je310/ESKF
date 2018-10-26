@@ -38,8 +38,39 @@ public:
             Eigen::Vector3f omega_b,
             Eigen::Vector3f g);
 
+    // The quaternion convention in the document is "Hamilton" convention.
+    // Eigen has a different order of components, so we need conversion
+    static Eigen::Quaternionf quatFromHamilton(Eigen::Vector4f qHam);
+    static Eigen::Vector4f quatToHamilton(Eigen::Quaternionf q);
+    static Eigen::Matrix3f rotVecToMat(Eigen::Vector3f in);
+    static Eigen::Quaternionf rotVecToQuat(Eigen::Vector3f in);
+    static Eigen::Matrix3f getSkew(Eigen::Vector3f in);
+
+    // Acessors of nominal state
+    inline Eigen::Vector3f getPos() { return nominalState.block<3, 1>(POS_IDX, 0); }
+    inline Eigen::Vector3f getVel() { return nominalState.block<3, 1>(VEL_IDX, 0); }
+    inline Eigen::Vector4f getQuatVector() { return nominalState.block<4, 1>(QUAT_IDX, 0); }
+    inline Eigen::Quaternionf getQuat() { return quatFromHamilton(getQuatVector()); }
+    inline Eigen::Vector3f getAccelBias() { return nominalState.block<3, 1>(AB_IDX, 0); }
+    inline Eigen::Vector3f getGyroBias() { return nominalState.block<3, 1>(GB_IDX, 0); }
+    inline Eigen::Vector3f getGravity() { return nominalState.block<3, 1>(GRAV_IDX, 0); }
+
     // Called when there is a new measurment from the IMU.
     void predictIMU(Eigen::Vector3f a_m, Eigen::Vector3f omega_m);
+
+    // Called when there is a new measurment from an absolute position reference.
+    // Note that this has no body offset, i.e. it assumes exact observation of the center of the IMU.
+    void measurePos(Eigen::Vector3f pos_meas);
+
+    // Called when there is a new measurment from an absolute position reference.
+    // The measurement is with respect to some location on the body that is not at the IMU center in general.
+    // pos_ref_body should specify the reference location in the body frame.
+    // For example, this would be the location of the GPS antenna on the body.
+    // NOT YET IMPLEMENTED
+    // void measurePosWithOffset(Eigen::Vector3f pos_meas, Eigen::Vector3f pos_ref_body);
+
+    // Called when there is a new measurment from an absolute orientation reference.
+    void measureQuat(Eigen::Quaternionf q_meas);
 
     // Called when there is a new measurment from an absolute position reference (such as Motion Capture, GPS, map matching etc )
     void observeErrorState(Eigen::Vector3f pos, Eigen::Quaternionf rot);
@@ -48,22 +79,8 @@ public:
     Eigen::Matrix<float, STATE_SIZE, 1> getTrueState();
     Eigen::Matrix3f getDCM();
 
-    // Acessors of nominal state
-    inline Eigen::Vector3f getPos() { return nominalState.block<3, 1>(POS_IDX, 0); }
-    inline Eigen::Vector3f getVel() { return nominalState.block<3, 1>(VEL_IDX, 0); }
-    inline Eigen::Vector4f getQuatVector() { return nominalState.block<4, 1>(QUAT_IDX, 0); }
-    inline Eigen::Quaternionf getQuat() { 
-        return Eigen::Quaternionf(getQuatVector());
-    }
-    inline Eigen::Vector3f getAccelBias() { return nominalState.block<3, 1>(AB_IDX, 0); }
-    inline Eigen::Vector3f getGyroBias() { return nominalState.block<3, 1>(GB_IDX, 0); }
-    inline Eigen::Vector3f getGravity() { return nominalState.block<3, 1>(GRAV_IDX, 0); }
-
 private:
-    static Eigen::Matrix3f getSkew(Eigen::Vector3f in);
-    static Eigen::Matrix3f rotVecToMat(Eigen::Vector3f in);
-    static Eigen::Quaternionf rotVecToQuat(Eigen::Vector3f in);
-
+    Eigen::Matrix<float, 4, 3> getQ_dtheta(); // eqn 280, page 62
     Eigen::Matrix<float, STATE_SIZE, 1> measurementFunc(Eigen::Matrix<float, STATE_SIZE, 1> in);
     void composeTrueState();
     void injectObservedError();

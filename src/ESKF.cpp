@@ -38,12 +38,27 @@ ESKF::ESKF(float delta_t, Matrix<float, STATE_SIZE, 1> initialState,
 Matrix<float, STATE_SIZE, 1> ESKF::makeState(Vector3f p, Vector3f v, Quaternionf q, 
             Vector3f a_b, Vector3f omega_b, Vector3f g) {
     Matrix<float, STATE_SIZE, 1> out;
-    out << p, v, q.coeffs(), a_b, omega_b, g;
+    out << p, v, quatToHamilton(q), a_b, omega_b, g;
     return out;
 }
 
 Matrix3f ESKF::getDCM() {
-    return Quaternionf(nominalState.block<4, 1>(QUAT_IDX, 0)).matrix();
+    return getQuat().matrix();
+}
+
+Quaternionf ESKF::quatFromHamilton(Eigen::Vector4f qHam) {
+    return Quaternionf(
+        (Vector4f() <<
+            qHam.block<3, 1>(1, 0), // x, y, z
+            qHam.block<1, 1>(0, 0) // w
+        ).finished());
+}
+
+Vector4f ESKF::quatToHamilton(Eigen::Quaternionf q){
+    return (Vector4f() <<
+            q.coeffs().block<1, 1>(3, 0), // w
+            q.coeffs().block<3, 1>(0, 0) // x, y, z
+        ).finished();
 }
 
 Matrix3f ESKF::getSkew(Vector3f in) {
@@ -83,7 +98,7 @@ void ESKF::predictIMU(Vector3f a_m, Vector3f omega_m) {
     Vector3f delta_pos = getVel()*dt_ + 0.5f*(acc_global + getGravity())*dt_*dt_;
     nominalState.block<3, 1>(POS_IDX, 0) += delta_pos;
     nominalState.block<3, 1>(VEL_IDX, 0) += (acc_global + getGravity())*dt_;
-    nominalState.block<4, 1>(QUAT_IDX, 0) = (getQuat()*q_theta).coeffs();
+    nominalState.block<4, 1>(QUAT_IDX, 0) = quatToHamilton(getQuat()*q_theta);
 
     // Jacobian of the state transition (eqn 269, page 59)
     // Update dynamic parts only
@@ -98,6 +113,23 @@ void ESKF::predictIMU(Vector3f a_m, Vector3f omega_m) {
     P = F_x_*P*F_x_.transpose();
     P.diagonal().block<4*3, 1>(dVEL_IDX, 0) += Q_diag_;
 
+}
+
+// eqn 280, page 62
+Matrix<float, 4, 3> ESKF::getQ_dtheta() {
+    Vector4f qby2 = 0.5f*getQuatVector();
+    // Assing to letters for readability. Note Hamilton order.
+    float w = qby2[0];
+    float x = qby2[1];
+    float y = qby2[2];
+    float z = qby2[3];
+    Matrix<float, 4, 3>Q_dtheta;
+    Q_dtheta <<
+        -x, -y, -z,
+        w, -z, y,
+        z, w, -x,
+        -y, x, w;
+    return Q_dtheta;
 }
 
 Matrix<float, STATE_SIZE, 1> ESKF::measurementFunc(Matrix<float, STATE_SIZE, 1> in) {
@@ -134,9 +166,7 @@ Matrix<float, STATE_SIZE, 1> ESKF::getTrueState() {
     Matrix<float, 3, 1>  angAxMat = errorState.block<3, 1>(6, 0);
     AngleAxisf AngAx(angAxMat.norm(), angAxMat.normalized());
     Quaternionf qError(AngAx);
-    Matrix<float, 4, 1> qMat = nominalState.block<4, 1>(6, 0);
-    Quaternionf qNom(qMat);
-    newState.block<4, 1>(6, 0) = (qNom*qError).coeffs();
+    newState.block<4, 1>(6, 0) = quatToHamilton(getQuat()*qError);
 
     //compose accelerometer drift
     newState.block<3, 1>(10, 0) = nominalState.block<3, 1>(10, 0) + errorState.block<3, 1>(9, 0);
@@ -163,13 +193,12 @@ void ESKF::resetError() {
 
 }
 
-
 // this function is called when you have a reference to correct the error state, in this case a mocap system.
 void ESKF::observeErrorState(Vector3f pos, Quaternionf rot) {
     Matrix<float, STATE_SIZE, 1> y;
     y.Zero();
     y.block<3, 1>(0, 0) = pos;
-    y.block<4, 1>(6, 0) << rot.coeffs();
+    y.block<4, 1>(6, 0) << quatToHamilton(rot);
 
     // setup X_dx, essensially an identity, with some quaternion stuff in the middle. Optimise by initilising everything elsewhere.
     X_dx.Zero();
@@ -179,13 +208,7 @@ void ESKF::observeErrorState(Vector3f pos, Quaternionf rot) {
     I9 = I9.Identity();
     X_dx.block<6, 6>(0, 0) = I6;
     X_dx.block<9, 9>(10, 9) = I9;
-    Matrix<float, 4, 1> q(nominalState.block<4, 1>(6, 0)); // getting quaternion, though in a mat, so we can divide by 2.
-    q = q / 2;
-    X_dx.block<4, 3>(6, 6) <<
-        -q.x(), -q.y(), -q.z(),
-        q.w(), -q.z(), q.y(),
-        q.z(), q.w(), -q.x(),
-        -q.y(), q.x(), q.w();
+
 
     // then set up H_x, though this is not told to us directly, it is described as:
     /*"Here, Hx , ∂h∂xt|x
@@ -219,8 +242,5 @@ void ESKF::observeErrorState(Vector3f pos, Quaternionf rot) {
     injectObservedError();
 
     resetError();
-
-
-
 
 }
