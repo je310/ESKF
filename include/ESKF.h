@@ -27,8 +27,8 @@
 class ESKF {
 public:
     // takes as input the  variance of the acceleration and gyro, where _n is the measurement noise, and _w is the pertibations of the system.
-    ESKF(Eigen::Matrix<float, STATE_SIZE, 1> initialState,
-            float sig2_a_n_, float sig2_omega_n_, float sig2_a_w_, float sig2_omega_w_);
+    ESKF(float delta_t, Eigen::Matrix<float, STATE_SIZE, 1> initialState,
+            float sig2_a_n, float sig2_omega_n, float sig2_a_w, float sig2_omega_w);
     // Concatenates relevant vectors to one large vector.
     static Eigen::Matrix<float, STATE_SIZE, 1> makeState(
             Eigen::Vector3f p,
@@ -39,14 +39,16 @@ public:
             Eigen::Vector3f g);
 
     // Called when there is a new measurment from the IMU.
-    void predictIMU(Eigen::Vector3f a, Eigen::Vector3f omega, float delta_t);
+    void predictIMU(Eigen::Vector3f a_m, Eigen::Vector3f omega_m);
 
     // Called when there is a new measurment from an absolute position reference (such as Motion Capture, GPS, map matching etc )
     void observeErrorState(Eigen::Vector3f pos, Eigen::Quaternionf rot);
 
     //returns the combination of the nominal state and the error state.
     Eigen::Matrix<float, STATE_SIZE, 1> getTrueState();
+    Eigen::Matrix3f getDCM();
 
+    // Acessors of nominal state
     inline Eigen::Vector3f getPos() { return nominalState.block<3, 1>(POS_IDX, 0); }
     inline Eigen::Vector3f getVel() { return nominalState.block<3, 1>(VEL_IDX, 0); }
     inline Eigen::Vector4f getQuatVector() { return nominalState.block<4, 1>(QUAT_IDX, 0); }
@@ -55,15 +57,22 @@ public:
     }
     inline Eigen::Vector3f getAccelBias() { return nominalState.block<3, 1>(AB_IDX, 0); }
     inline Eigen::Vector3f getGyroBias() { return nominalState.block<3, 1>(GB_IDX, 0); }
+    inline Eigen::Vector3f getGravity() { return nominalState.block<3, 1>(GRAV_IDX, 0); }
 
-    //private:
-    Eigen::Matrix3f getRotationMatrixFromState(Eigen::Matrix<float, STATE_SIZE, 1> state);
-    Eigen::Matrix3f getSkew(Eigen::Vector3f in);
-    Eigen::Matrix3f rotVecToMat(Eigen::Vector3f in);
+private:
+    static Eigen::Matrix3f getSkew(Eigen::Vector3f in);
+    static Eigen::Matrix3f rotVecToMat(Eigen::Vector3f in);
+    static Eigen::Quaternionf rotVecToQuat(Eigen::Vector3f in);
+
     Eigen::Matrix<float, STATE_SIZE, 1> measurementFunc(Eigen::Matrix<float, STATE_SIZE, 1> in);
     void composeTrueState();
     void injectObservedError();
     void resetError();
+
+    // We assume a fixed dt, so we can precompute many matrices
+    const float dt_;
+    // Process noise, stored as a vector of the diagonal
+    Eigen::Matrix<float, 4*3, 1> Q_diag_;
 
     // states
     Eigen::Matrix<float, STATE_SIZE, 1> trueState;
@@ -71,22 +80,11 @@ public:
     Eigen::Matrix<float, STATE_SIZE, 1> nominalState;
 
 
-    //covarience matrices as defined on page 59
-    Eigen::Matrix3f V_i;
-    Eigen::Matrix3f THETA_i;
-    Eigen::Matrix3f A_i;
-    Eigen::Matrix3f OMEGA_i;
-    float sig2_a_n;
-    float sig2_a_w;
-    float sig2_omega_n;
-    float sig2_omega_w;
 
-
-    //jacobians of f() as defined on page 59// not sure if should be STATE_SIZE in size, the quaternion seems to be a rotation matrix here.
-    // Matrix<float, dSTATE_SIZE,dSTATE_SIZE> F_x;
-    Eigen::Matrix<float, dSTATE_SIZE, 12> F_i;
-    //covariances matrix of the perturbation impulses.
-    Eigen::Matrix <float, 12, 12> Q_i;
+    // Jacobian of the state transition: page 59, eqn 269
+    // Note that we precompute the static parts in the constructor,
+    // and only update the dynamic parts in the predict function
+    Eigen::Matrix<float, dSTATE_SIZE,dSTATE_SIZE> F_x_;
 
     // the P matrix
     Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE> P;

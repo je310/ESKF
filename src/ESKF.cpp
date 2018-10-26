@@ -3,18 +3,37 @@
 using namespace Eigen;
 using namespace std;
 
-ESKF::ESKF(Matrix<float, STATE_SIZE, 1> initialState, 
-        float sig2_a_n_, float sig2_omega_n_, float sig2_a_w_, float sig2_omega_w_) {
-    trueState = initialState;
-    sig2_a_n = sig2_a_n_;
-    sig2_omega_n = sig2_omega_n_;
-    sig2_a_w = sig2_a_w_;
-    sig2_omega_w = sig2_omega_w_;
+ESKF::ESKF(float delta_t, Matrix<float, STATE_SIZE, 1> initialState,
+        float var_a_n, float var_omega_n, float var_a_w, float var_omega_w)
+        : dt_(delta_t),
+        trueState(initialState) {
+    
+    // Jacobian of the state transition: page 59, eqn 269
+    // Precompute constant part only
+    F_x_.setZero();
+    // dPos row
+    F_x_.block<3, 3>(dPOS_IDX, dPOS_IDX) = I_3;
+    F_x_.block<3, 3>(dPOS_IDX, dVEL_IDX) = I_3 * dt_;
+    // dVel row
+    F_x_.block<3, 3>(dVEL_IDX, dVEL_IDX) = I_3;
+    F_x_.block<3, 3>(dVEL_IDX, dGRAV_IDX) = I_3 * dt_;
+    // dTheta row
+    F_x_.block<3, 3>(dTHETA_IDX, dGB_IDX) = -I_3 * dt_;
+    // dGyroBias row
+    F_x_.block<3, 3>(dAB_IDX, dAB_IDX) = I_3;
+    // dAccelBias row
+    F_x_.block<3, 3>(dGB_IDX, dGB_IDX) = I_3;
+    // dGravity row
+    F_x_.block<3, 3>(dGRAV_IDX, dGRAV_IDX) = I_3;
 
-    //Build F_i,
-    F_i.setZero();
-    F_i.block<12, 12>(3, 0).setIdentity();
+    // Precompute Q
+    Q_diag_ <<
+        (var_a_n*dt_*dt_     * I_3).diagonal(),
+        (var_omega_n*dt_*dt_ * I_3).diagonal(),
+        (var_a_w*dt_         * I_3).diagonal(),
+        (var_omega_w*dt_     * I_3).diagonal();
 }
+
 
 Matrix<float, STATE_SIZE, 1> ESKF::makeState(Vector3f p, Vector3f v, Quaternionf q, 
             Vector3f a_b, Vector3f omega_b, Vector3f g) {
@@ -23,10 +42,8 @@ Matrix<float, STATE_SIZE, 1> ESKF::makeState(Vector3f p, Vector3f v, Quaternionf
     return out;
 }
 
-Matrix3f ESKF::getRotationMatrixFromState(Matrix<float, STATE_SIZE, 1> state) {
-    Matrix<float, 4, 1> mat = state.block<4, 1>(6, 0);
-    Quaternionf quat(mat);
-    return quat.matrix();
+Matrix3f ESKF::getDCM() {
+    return Quaternionf(nominalState.block<4, 1>(QUAT_IDX, 0)).matrix();
 }
 
 Matrix3f ESKF::getSkew(Vector3f in) {
@@ -39,59 +56,47 @@ Matrix3f ESKF::getSkew(Vector3f in) {
 
 Matrix3f ESKF::rotVecToMat(Vector3f in) {
     float angle = in.norm();
-    Vector3f axis = in.normalized();
-    if (angle == 0) axis = Vector3f(1, 0, 0);
-
-
+    Vector3f axis = (angle == 0) ? Vector3f(1, 0, 0) : in.normalized();
     AngleAxisf angAx(angle, axis);
     return angAx.toRotationMatrix();
 }
 
-void ESKF::predictIMU(Vector3f a, Vector3f omega, float delta_t) {
-    // Build F_x
-    Matrix<float, dSTATE_SIZE, dSTATE_SIZE> F_x;
-    F_x.setZero();
-    Matrix3f rotation = getRotationMatrixFromState(nominalState);
-    
-    // page 59, eqn 269
-    // dPos row
-    F_x.block<3, 3>(dPOS_IDX, dPOS_IDX) = I_3;
-    F_x.block<3, 3>(dPOS_IDX, dVEL_IDX) = I_3 * delta_t;
+Quaternionf ESKF::rotVecToQuat(Vector3f in) {
+    float angle = in.norm();
+    Vector3f axis = (angle == 0) ? Vector3f(1, 0, 0) : in.normalized();
+    return Quaternionf(AngleAxisf(angle, axis));
+}
+
+void ESKF::predictIMU(Vector3f a_m, Vector3f omega_m) {
+    // DCM of current state
+    Matrix3f Rot = getDCM();
+    // Accelerometer measurement
+    Vector3f acc_body = a_m - getAccelBias();
+    Vector3f acc_global = Rot * acc_body;
+    // Gyro measruement
+    Vector3f omega = omega_m - getGyroBias();
+    Vector3f theta = omega * dt_;
+    Quaternionf q_theta = rotVecToQuat(theta);
+    Matrix3f R_theta = q_theta.toRotationMatrix();
+
+    // Nominal state kinematics (eqn 259, pg 58)
+    Vector3f delta_pos = getVel()*dt_ + 0.5f*(acc_global + getGravity())*dt_*dt_;
+    nominalState.block<3, 1>(POS_IDX, 0) += delta_pos;
+    nominalState.block<3, 1>(VEL_IDX, 0) += (acc_global + getGravity())*dt_;
+    nominalState.block<4, 1>(QUAT_IDX, 0) = (getQuat()*q_theta).coeffs();
+
+    // Jacobian of the state transition (eqn 269, page 59)
+    // Update dynamic parts only
     // dVel row
-    F_x.block<3, 3>(dVEL_IDX, dVEL_IDX) = I_3;
-    F_x.block<3, 3>(dVEL_IDX, dTHETA_IDX) = 
-            -rotation * getSkew(a - nominalState.block<3, 1>(AB_IDX, 0)) * delta_t;
-    F_x.block<3, 3>(dVEL_IDX, dAB_IDX) = -rotation * delta_t;
-    F_x.block<3, 3>(dVEL_IDX, dGRAV_IDX) = I_3 * delta_t;
+    F_x_.block<3, 3>(dVEL_IDX, dTHETA_IDX) = -Rot * getSkew(acc_body) * dt_;
+    F_x_.block<3, 3>(dVEL_IDX, dAB_IDX) = -Rot * dt_;
     // dTheta row
-    Vector3f delta_theta = (omega - nominalState.block<3, 1>(GB_IDX, 0))*delta_t;
-    F_x.block<3, 3>(dTHETA_IDX, dTHETA_IDX) = rotVecToMat(delta_theta).transpose();
-    F_x.block<3, 3>(dTHETA_IDX, dGB_IDX) = -I_3 * delta_t;
-    // dGyroBias row
-    F_x.block<3, 3>(dAB_IDX, dAB_IDX) = I_3;
-    // dAccelBias row
-    F_x.block<3, 3>(dGB_IDX, dGB_IDX) = I_3;
-    // dGravity row
-    F_x.block<3, 3>(dGRAV_IDX, dGRAV_IDX) = I_3;
+    Vector3f delta_theta = omega * dt_;
+    F_x_.block<3, 3>(dTHETA_IDX, dTHETA_IDX) = R_theta.transpose();
 
-
-
-    // build Q_i, this is only a diagonal matrix augmented by a scalar, so could be more efficient to for loop the relevant entries.
-
-    Q_i.setZero();
-    Q_i.block<3, 3>(0, 0) = sig2_a_n*delta_t*delta_t * I_3;
-    Q_i.block<3, 3>(3, 3) = sig2_omega_n*delta_t*delta_t * I_3;
-    Q_i.block<3, 3>(6, 6) = sig2_a_w*delta_t * I_3;
-    Q_i.block<3, 3>(9, 9) = sig2_omega_w*delta_t * I_3;
-
-    //probably unnecessary copying here. Need to check if things are done inplace or otherwise. //.eval should fix this issue This is by far the most expensive line (roughly 30% cpu alocation on mbed)
-    P = F_x*P*F_x.transpose() + F_i*Q_i*F_i.transpose();
-
-
-    //this line is apparently not needed, according to the document. // I suspect it only meant in the first iteration?????
-    errorState = F_x * errorState;
-
-
+    // Predict P and optimized inject variance
+    P = F_x_*P*F_x_.transpose();
+    P.diagonal().block<4*3, 1>(dVEL_IDX, 0) += Q_diag_;
 
 }
 
