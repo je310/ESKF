@@ -84,9 +84,6 @@ public:
     // The uncertianty is represented as the covariance of a rotation vector in the body frame
     void measureQuat(const Eigen::Quaternionf& q_meas, const Eigen::Matrix3f& theta_covariance);
 
-    // Called when there is a new measurment from an absolute position reference (such as Motion Capture, GPS, map matching etc )
-    void observeErrorState(Eigen::Vector3f pos, Eigen::Quaternionf rot);
-
     Eigen::Matrix3f getDCM();
 
 private:
@@ -111,5 +108,5 @@ private:
     // Jacobian of the state transition: page 59, eqn 269
     // Note that we precompute the static parts in the constructor,
     // and only update the dynamic parts in the predict function
-    Eigen::Matrix<float, dSTATE_SIZE,dSTATE_SIZE> F_x_;
+    Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE> F_x_;
 };
