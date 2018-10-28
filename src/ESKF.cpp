@@ -139,7 +139,7 @@ void ESKF::predictIMU(const Vector3f& a_m, const Vector3f& omega_m) {
     // Symmetric matrix optimization: Only evaluate lower triangular, then copy to upper
     // This is not faster on a vectorizing machine, but on an embedded target it probably is.
     // TODO: verify this!
-    P_.triangularView<Lower>() = F_x_*P_*F_x_.transpose();
+    P_.triangularView<Lower>() = F_x_ * P_.selfadjointView<Lower>() * F_x_.transpose();
     P_ = P_.selfadjointView<Lower>();
 
     P_.diagonal().block<4*3, 1>(dVEL_IDX, 0) += Q_diag_;
