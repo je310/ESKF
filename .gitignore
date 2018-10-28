@@ -42,3 +42,8 @@ CTestTestfile.cmake
 *.exe
 *.out
 *.app
+
+
+#Visual studio
+.vs/
+*.json

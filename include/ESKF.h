@@ -1,81 +1,112 @@
+
+// Malloc is really bad on embedded platform
+#define EIGEN_NO_MALLOC
 #include <Core.h>
 #include <Geometry.h>
 #include <iostream>
 
-
-#define GRAVITY 	9.812  // London g value.
 #define SUPPORT_STDIOSTREAM
 
-using namespace Eigen;
-using namespace std;
+#define POS_IDX (0)
+#define VEL_IDX (POS_IDX + 3)
+#define QUAT_IDX (VEL_IDX + 3)
+#define AB_IDX (QUAT_IDX + 4)
+#define GB_IDX (AB_IDX + 3)
+#define STATE_SIZE (GB_IDX + 3)
+
+#define dPOS_IDX (0)
+#define dVEL_IDX (dPOS_IDX + 3)
+#define dTHETA_IDX (dVEL_IDX + 3)
+#define dAB_IDX (dTHETA_IDX + 3)
+#define dGB_IDX (dAB_IDX + 3)
+#define dSTATE_SIZE (dGB_IDX + 3)
+
+#define I_3 (Eigen::Matrix3f::Identity())
+#define I_dx (Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>::Identity())
 
 //the main ESKF class
-class ESKF{
+class ESKF {
 public:
+    ESKF() {};
     // takes as input the  variance of the acceleration and gyro, where _n is the measurement noise, and _w is the pertibations of the system.
-    ESKF(Matrix<float, 19,1> initialState, float sig2_a_n_, float sig2_omega_n_,float sig2_a_w_, float sig2_omega_w_);
-    ESKF();
-    // concatonates  relevant vectors to one large vector.
-    Matrix<float, 19,1> makeState(Vector3f p,Vector3f v, Quaternionf q, Vector3f a_b, Vector3f omega_b,Vector3f g );
+    ESKF(float delta_t, Eigen::Vector3f a_gravity,
+            const Eigen::Matrix<float, STATE_SIZE, 1>& initialState,
+            const Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>& initalP,
+            float sig2_a_n, float sig2_omega_n, float sig2_a_w, float sig2_omega_w);
+    // Concatenates relevant vectors to one large vector.
+    static Eigen::Matrix<float, STATE_SIZE, 1> makeState(
+            const Eigen::Vector3f& p,
+            const Eigen::Vector3f& v,
+            const Eigen::Quaternionf& q,
+            const Eigen::Vector3f& a_b,
+            const Eigen::Vector3f& omega_b);
+
+    static Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE> makeP(
+        const Eigen::Matrix3f& cov_pos,
+        const Eigen::Matrix3f& cov_vel,
+        const Eigen::Matrix3f& cov_dtheta,
+        const Eigen::Matrix3f& cov_a_b,
+        const Eigen::Matrix3f& cov_omega_b);
+
+    // The quaternion convention in the document is "Hamilton" convention.
+    // Eigen has a different order of components, so we need conversion
+    static Eigen::Quaternionf quatFromHamilton(const Eigen::Vector4f& qHam);
+    static Eigen::Vector4f quatToHamilton(const Eigen::Quaternionf& q);
+    static Eigen::Matrix3f rotVecToMat(const Eigen::Vector3f& in);
+    static Eigen::Quaternionf rotVecToQuat(const Eigen::Vector3f& in);
+    static Eigen::Vector3f quatToRotVec(const Eigen::Quaternionf& q);
+    static Eigen::Matrix3f getSkew(const Eigen::Vector3f& in);
+
+    // Acessors of nominal state
+    inline Eigen::Vector3f getPos() { return nominalState_.block<3, 1>(POS_IDX, 0); }
+    inline Eigen::Vector3f getVel() { return nominalState_.block<3, 1>(VEL_IDX, 0); }
+    inline Eigen::Vector4f getQuatVector() { return nominalState_.block<4, 1>(QUAT_IDX, 0); }
+    inline Eigen::Quaternionf getQuat() { return quatFromHamilton(getQuatVector()); }
+    inline Eigen::Vector3f getAccelBias() { return nominalState_.block<3, 1>(AB_IDX, 0); }
+    inline Eigen::Vector3f getGyroBias() { return nominalState_.block<3, 1>(GB_IDX, 0); }
 
     // Called when there is a new measurment from the IMU.
-    void updateStateIMU(Vector3f a, Vector3f omega, float delta_t);
+    void predictIMU(const Eigen::Vector3f& a_m, const Eigen::Vector3f& omega_m);
 
-    // Called when there is a new measurment from an absolute position reference (such as Motion Capture, GPS, map matching etc )
-    void observeErrorState(Vector3f pos, Quaternionf rot);
+    // Called when there is a new measurment from an absolute position reference.
+    // Note that this has no body offset, i.e. it assumes exact observation of the center of the IMU.
+    void measurePos(const Eigen::Vector3f& pos_meas, const Eigen::Matrix3f& pos_covariance);
 
-    //returns the combination of the nominal state and the error state.
-    Matrix<float,19,1> getTrueState();
-//private:
+    // Called when there is a new measurment from an absolute position reference.
+    // The measurement is with respect to some location on the body that is not at the IMU center in general.
+    // pos_ref_body should specify the reference location in the body frame.
+    // For example, this would be the location of the GPS antenna on the body.
+    // NOT YET IMPLEMENTED
+    // void measurePosWithOffset(Eigen::Vector3f pos_meas, Matrix3f pos_covariance, 
+    //        Eigen::Vector3f pos_ref_body);
 
-    Matrix<float, 3,3> getRotationMatrixFromState(Matrix<float, 19,1> state);
-    Matrix<float,3,3> getSkew(Vector3f in);
-    Matrix<float,3,3> AngAxToMat(Vector3f in);
-    Matrix<float,19,1> measurementFunc(Matrix<float,19,1> in);
-    void composeTrueState();
-    void injectObservedError();
-    void resetError();
+    // Called when there is a new measurment from an absolute orientation reference.
+    // The uncertianty is represented as the covariance of a rotation vector in the body frame
+    void measureQuat(const Eigen::Quaternionf& q_meas, const Eigen::Matrix3f& theta_covariance);
 
-    void predictionUpdate(Vector3f a, Vector3f omega, float delta_t);
+    Eigen::Matrix3f getDCM();
 
-    // states
-    Matrix<float, 19,1> trueState;
-    Matrix<float, 18,1> errorState;
-    Matrix<float, 19,1> nominalState;
+private:
+    Eigen::Matrix<float, 4, 3> getQ_dtheta(); // eqn 280, page 62
+    void update_3D(
+        const Eigen::Vector3f& delta_measurement,
+        const Eigen::Matrix3f& meas_covariance,
+        const Eigen::Matrix<float, 3, dSTATE_SIZE>& H);
+    void injectErrorState(const Eigen::Matrix<float, dSTATE_SIZE, 1>& error_state);
 
+    // We assume a fixed dt, so we can precompute matrices
+    float dt_;
+    // Acceleration due to gravity in global frame
+    Eigen::Vector3f a_gravity_; // [m/s^2] 
+    // State vector of the filter
+    Eigen::Matrix<float, STATE_SIZE, 1> nominalState_;
+    // Covariance of the (error) state
+    Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE> P_;
 
-    //covarience matrices as defined on page 59
-    Matrix<float, 3,3> V_i;
-    Matrix<float, 3,3> PHI_i;
-    Matrix<float, 3,3> A_i;
-    Matrix<float, 3,3> OMEGA_i;
-    float sig2_a_n;
-    float sig2_a_w;
-    float sig2_omega_n;
-    float sig2_omega_w;
-
-
-    //jacobians of f() as defined on page 59// not sure if should be 19 in size, the quaternion seems to be a rotation matrix here.
-    Matrix<float, 18,18> F_x;
-    Matrix<float, 18,12> F_i;
-    //covariances matrix of the perturbation impulses.
-    Matrix <float, 12,12> Q_i;
-
-    // the P matrix
-    Matrix<float, 18,18> P;
-
-    // the K matrix
-    Matrix<float, 18,19> K;
-
-
-    //Jacobian of the true state with respect to the error state. Page 61.
-    Matrix<float, 19,18> H;
-    Matrix<float, 19, 19> H_x;
-    Matrix<float, 19, 18> X_dx;
-
-    Matrix<float, 4, 3> Q_dTheta;
-
-    // Jacobian matrix defined on page 63, can have a simple implementation as an Identity, or one that has a correction term
-    Matrix<float, 18,18> G;
-
+    // Process noise, stored as a vector of the diagonal
+    Eigen::Matrix<float, 4*3, 1> Q_diag_;
+    // Jacobian of the state transition: page 59, eqn 269
+    // Note that we precompute the static parts in the constructor,
+    // and only update the dynamic parts in the predict function
+    Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE> F_x_;
 };
