@@ -60,7 +60,7 @@ int main(int argc, char** argv) {
 
     tf::TransformBroadcaster tb;
 
-    DataFiles filesObj("/home/josh/newDownloads/DeltaRobotFirmware/build/timeSeries/gentleWave");
+    DataFiles filesObj("../timeSeries/gentleWave");
 
     int flag = 0;
 
