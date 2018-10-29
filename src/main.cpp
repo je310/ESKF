@@ -82,6 +82,7 @@ int main(int argc, char** argv) {
             pred.frame_id_ = "mocha_world";
             pred.child_frame_id_ = "pred";
             tb.sendTransform(pred);
+            //cout << "secs:" << imu.stamp.sec << " nsecs:" << imu.stamp.nsec << endl;
         }
         if(type == isMocapData){
             eskf.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3);
@@ -94,6 +95,7 @@ int main(int argc, char** argv) {
             meas.frame_id_ = "mocha_world";
             meas.child_frame_id_ = "meas";
             tb.sendTransform(meas);
+            //cout << "secs:" << mocap.stamp.sec << " nsecs:" << mocap.stamp.nsec << "was Mocap" << endl;
         }
     }
 
