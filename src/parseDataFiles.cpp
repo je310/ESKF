@@ -2,10 +2,10 @@
 #include<parseDataFiles.h>
 
 
-void DataFiles::getNext(ifstream &file, mocapData &mocap, imuData &imu, int &type){
+int DataFiles::getNext(ifstream &file, mocapData &mocap, imuData &imu, int &type){
 
     string str;
-    std::getline(readerMixed,str,',');
+    std::getline(file,str,',');
     if(!str.compare("IMU")){
         type = isImuData;
 
@@ -32,9 +32,10 @@ void DataFiles::getNext(ifstream &file, mocapData &mocap, imuData &imu, int &typ
 
         std::getline(file,str,'\n');
         imu.stamp.nsec = atoi(str.c_str());
+        return 0;
 
     }
-    else{
+    if(!str.compare("Mocap")){
         type = isMocapData;
 
 
@@ -72,9 +73,60 @@ void DataFiles::getNext(ifstream &file, mocapData &mocap, imuData &imu, int &typ
 
         std::getline(file,str,'\n');
         mocap.receivedTime.nsec = atoi(str.c_str());
+        return 0;
     }
 
-    return;
+    file.close();
+
+
+    return 1;
+
+}
+
+int DataFiles::getNextTimeCorrected(ifstream &mocapFile,ifstream &imuFile,mocapData &mocap,imuData &imu,int &type){
+
+    static mocapData mocapTemp;
+    static imuData imuTemp;
+    static int primed = 0;
+    int typeTemp;
+    int error = 0;
+    if(!primed){
+        primed = 1;
+        error = getNext(mocapFile,mocapTemp,imuTemp, typeTemp);
+        error += getNext(imuFile,mocapTemp,imuTemp, typeTemp);
+        ros::Duration dur = imuTemp.stamp - mocapTemp.stamp;
+        if(dur.toSec() >= 0){
+            typeTemp = isMocapData;
+        }
+        else{
+            typeTemp = isImuData;
+        }
+        mocap = mocapTemp;
+        imu = imuTemp;
+        type = typeTemp;
+        return error;
+    }
+    else{
+        //the oldest one would have been sent, update the other one.
+        ros::Duration dur = imuTemp.stamp - mocapTemp.stamp;
+        if(dur.toSec() >= 0){
+             error = getNext(mocapFile,mocapTemp,imuTemp, typeTemp);
+        }
+        else{
+            error = getNext(imuFile,mocapTemp,imuTemp, typeTemp);
+        }
+        dur = imuTemp.stamp - mocapTemp.stamp;
+        if(dur.toSec() >= 0){
+            typeTemp = isMocapData;
+        }
+        else{
+            typeTemp = isImuData;
+        }
+        mocap = mocapTemp;
+        imu = imuTemp;
+        type = typeTemp;
+        return error;
+    }
 
 }
 

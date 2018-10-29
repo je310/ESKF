@@ -40,7 +40,8 @@ public:
 
     DataFiles(std::string path);
 
-    void getNext(ifstream &file, mocapData &mocap, imuData &imu, int &type);
+    int getNext(ifstream &file, mocapData &mocap, imuData &imu, int &type);
+    int getNextTimeCorrected(ifstream &mocapFile, ifstream &imuFile, mocapData &mocap, imuData &imu, int &type);
 
 };
 

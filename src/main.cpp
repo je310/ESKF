@@ -25,8 +25,8 @@ int main(int argc, char** argv) {
     float sigma_init_accel_bias = 100*sigma_accel_drift; // [m/s^2]
     float sigma_init_gyro_bias = 100*sigma_gyro_drift; // [rad/s]
 
-    float sigma_mocap_pos = 0.01; // [m]
-    float sigma_mocap_rot = 0.1; // [rad]
+    float sigma_mocap_pos = 0.001; // [m]
+    float sigma_mocap_rot = 0.001; // [rad]
 
     ESKF eskf(
             0.001f, // delta_t
@@ -62,11 +62,14 @@ int main(int argc, char** argv) {
 
     DataFiles filesObj("/home/josh/newDownloads/DeltaRobotFirmware/build/timeSeries/gentleWave");
 
-    while(filesObj.readerMixed.is_open()){
+    int flag = 0;
+
+    while(!flag){
         imuData imu;
         mocapData mocap;
         int type;
-        filesObj.getNext(filesObj.readerMixed,mocap,imu,type);
+        //filesObj.getNext(filesObj.readerMixed,mocap,imu,type);
+        flag = filesObj.getNextTimeCorrected(filesObj.readerMocap,filesObj.readerIMU,mocap,imu,type);
         if(type == isImuData){
             eskf.predictIMU(GRAVITY * imu.accel, M_PI*imu.gyro/180);
 
