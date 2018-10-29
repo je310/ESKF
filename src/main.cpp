@@ -10,16 +10,16 @@ using namespace std;
 
 int main(int argc, char** argv) {
 
-    float sigma_accel = 0.1; // [m/s^2]
-    float sigma_gyro = 0.01; // [rad/s]
-    float sigma_accel_drift = 1e-6; // [m/s^2 sqrt(s)]
-    float sigma_gyro_drift = 1e-6; // [rad/s sqrt(s)]
+    float sigma_accel = 0.124; // [m/s^2]  (value derived from Noise Spectral Density in datasheet)
+    float sigma_gyro = 0.00276; // [rad/s] (value derived from Noise Spectral Density in datasheet)
+    float sigma_accel_drift = 0.0025; // [m/s^2 sqrt(s)] (Educated guess, real value to be measured)
+    float sigma_gyro_drift = 5e-5; // [rad/s sqrt(s)] (Educated guess, real value to be measured)
 
     float sigma_init_pos = 1.0; // [m]
     float sigma_init_vel = 0.1; // [m/s]
     float sigma_init_dtheta = 1.0; // [rad]
-    float sigma_init_accel_bias = 1.0; // [m/s^2]
-    float sigma_init_gyro_bias = 1.0; // [rad/s]
+    float sigma_init_accel_bias = 100*sigma_accel_drift; // [m/s^2]
+    float sigma_init_gyro_bias = 100*sigma_gyro_drift; // [rad/s]
 
     float sigma_mocap_pos = 0.01; // [m]
     float sigma_mocap_rot = 0.1; // [rad]
