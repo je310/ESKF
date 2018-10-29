@@ -25,8 +25,8 @@ int main(int argc, char** argv) {
     float sigma_init_accel_bias = 100*sigma_accel_drift; // [m/s^2]
     float sigma_init_gyro_bias = 100*sigma_gyro_drift; // [rad/s]
 
-    float sigma_mocap_pos = 0.001; // [m]
-    float sigma_mocap_rot = 0.001; // [rad]
+    float sigma_mocap_pos = 0.0003; // [m]
+    float sigma_mocap_rot = 0.0003; // [rad]
 
     ESKF eskf(
             0.001f, // delta_t
@@ -60,16 +60,17 @@ int main(int argc, char** argv) {
 
     tf::TransformBroadcaster tb;
 
-    DataFiles filesObj("../timeSeries/gentleWave");
+    DataFiles filesObj("../timeSeries/hardWave");
 
     int flag = 0;
-
+    int count = 0 ;
     while(!flag){
         imuData imu;
         mocapData mocap;
+        count ++ ;
         int type;
-        //filesObj.getNext(filesObj.readerMixed,mocap,imu,type);
-        flag = filesObj.getNextTimeCorrected(filesObj.readerMocap,filesObj.readerIMU,mocap,imu,type);
+        //flag = filesObj.getNext(filesObj.readerMixed,mocap,imu,type);  // emulates arrival of the data with lag
+        flag = filesObj.getNextTimeCorrected(filesObj.readerMocap,filesObj.readerIMU,mocap,imu,type); // emulates lag free data
         if(type == isImuData){
             eskf.predictIMU(GRAVITY * imu.accel, M_PI*imu.gyro/180);
 
@@ -84,9 +85,12 @@ int main(int argc, char** argv) {
             tb.sendTransform(pred);
             //cout << "secs:" << imu.stamp.sec << " nsecs:" << imu.stamp.nsec << endl;
         }
+
         if(type == isMocapData){
+
             eskf.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3);
             eskf.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3);
+
 
             tf::StampedTransform meas;
             meas.setOrigin(tf::Vector3(mocap.pos[0],mocap.pos[1],mocap.pos[2]));
