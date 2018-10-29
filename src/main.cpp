@@ -1,6 +1,10 @@
 #include <ESKF.h>
 #include <iostream>
 #include <chrono>
+#include <parseDataFiles.h>
+#include <geometry_msgs/PoseWithCovariance.h>
+#include <tf/transform_broadcaster.h>
+#include <math.h>
 
 #define SQ(x) (x*x)
 #define GRAVITY 	9.812  // London g value.
@@ -46,6 +50,54 @@ int main(int argc, char** argv) {
             SQ(sigma_accel_drift),
             SQ(sigma_gyro_drift));
 
+    //dirty debugging area for josh START:
+
+    ros::init(argc, argv, "TestESKF");
+
+    ros::NodeHandle node;
+
+    ros::Publisher posePub = node.advertise<geometry_msgs::PoseWithCovariance>("predictiedLocation",1);
+
+    tf::TransformBroadcaster tb;
+
+    DataFiles filesObj("/home/josh/newDownloads/DeltaRobotFirmware/build/timeSeries/gentleWave");
+
+    while(filesObj.readerMixed.is_open()){
+        imuData imu;
+        mocapData mocap;
+        int type;
+        filesObj.getNext(filesObj.readerMixed,mocap,imu,type);
+        if(type == isImuData){
+            eskf.predictIMU(GRAVITY * imu.accel, M_PI*imu.gyro/180);
+
+            tf::StampedTransform pred;
+            Vector3f pos = eskf.getPos();
+            Quaternionf quat = eskf.getQuat();
+            pred.setOrigin(tf::Vector3(pos[0],pos[1],pos[2]));
+            pred.setRotation(tf::Quaternion(quat.x(),quat.y(),quat.z(),quat.w()));
+            pred.stamp_ = ros::Time::now();
+            pred.frame_id_ = "mocha_world";
+            pred.child_frame_id_ = "pred";
+            tb.sendTransform(pred);
+        }
+        if(type == isMocapData){
+            eskf.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3);
+            eskf.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3);
+
+            tf::StampedTransform meas;
+            meas.setOrigin(tf::Vector3(mocap.pos[0],mocap.pos[1],mocap.pos[2]));
+            meas.setRotation(tf::Quaternion(mocap.quat.x(),mocap.quat.y(),mocap.quat.z(),mocap.quat.w()));
+            meas.stamp_ = ros::Time::now();
+            meas.frame_id_ = "mocha_world";
+            meas.child_frame_id_ = "meas";
+            tb.sendTransform(meas);
+        }
+    }
+
+
+    //dirty debugging area for josh END:
+
+
     //timing some key things just for some insight. Accell is 1000hz and mocap is 100hz.
     float sim_data_duration = 1000.0f; //seconds
     auto start = std::chrono::system_clock::now();
@@ -63,6 +115,19 @@ int main(int argc, char** argv) {
         Vector3f gyro = sigma_gyro * Vector3f::Random();
         // Input our accel/gyro data
         eskf.predictIMU(acc, gyro);
+
+
+        //optional ros viz JOSH MESSY
+        tf::StampedTransform pred;
+        Vector3f pos = eskf.getPos();
+        Quaternionf quat = eskf.getQuat();
+        pred.setOrigin(tf::Vector3(pos[0],pos[1],pos[2]));
+        pred.setRotation(tf::Quaternion(quat.x(),quat.y(),quat.z(),quat.w()));
+        pred.stamp_ = ros::Time::now();
+        pred.frame_id_ = "mocha_world";
+        pred.child_frame_id_ = "pred";
+        tb.sendTransform(pred);
+        //end optional ros viz JOSH MESSY
 
         // 10 accel/gyro measurements per motion capture input.
         if (ms % 10 == 0) {
