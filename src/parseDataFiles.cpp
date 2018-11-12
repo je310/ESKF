@@ -90,7 +90,7 @@ int DataFiles::getNextTimeCorrected(ifstream &mocapFile,ifstream &imuFile,mocapD
     static int primed = 0;
     int typeTemp;
     int error = 0;
-    ros::Duration hack(0.0135);
+    ros::Duration hack(0);
     if(!primed){
         primed = 1;
         error = getNext(mocapFile,mocapTemp,imuTemp, typeTemp);
@@ -129,6 +129,21 @@ int DataFiles::getNextTimeCorrected(ifstream &mocapFile,ifstream &imuFile,mocapD
         return error;
     }
 
+}
+
+int DataFiles::getNextNotCorrected(ifstream &mixedFile,mocapData &mocap,imuData &imu,int &type){
+
+    static mocapData mocapTemp;
+    static imuData imuTemp;
+    static int primed = 0;
+    int typeTemp;
+    int error = 0;
+    primed = 1;
+    error = getNext(mixedFile,mocapTemp,imuTemp, typeTemp);
+    mocap = mocapTemp;
+    imu = imuTemp;
+    type = typeTemp;
+    return error;
 }
 
 

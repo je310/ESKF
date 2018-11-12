@@ -1,5 +1,6 @@
 #ifndef ESKF_H
 #define ESKF_H
+
 // Malloc is really bad on embedded platform
 #define EIGEN_NO_MALLOC
 #include <Core.h>
@@ -22,18 +23,17 @@
 #define dGB_IDX (dAB_IDX + 3)
 #define dSTATE_SIZE (dGB_IDX + 3)
 
-#define I_3 (Eigen::Matrix3f::Identity())
-#define I_dx (Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>::Identity())
-
 //the main ESKF class
 class ESKF {
 public:
     ESKF() {};
     // takes as input the  variance of the acceleration and gyro, where _n is the measurement noise, and _w is the pertibations of the system.
-    ESKF(float delta_t, Eigen::Vector3f a_gravity,
+    ESKF(Eigen::Vector3f a_gravity,
             const Eigen::Matrix<float, STATE_SIZE, 1>& initialState,
             const Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>& initalP,
-            float sig2_a_n, float sig2_omega_n, float sig2_a_w, float sig2_omega_w);
+            float var_acc, float var_omega, float var_acc_bias, float var_omega_bias,
+            int delayHandling);
+
     // Concatenates relevant vectors to one large vector.
     static Eigen::Matrix<float, STATE_SIZE, 1> makeState(
             const Eigen::Vector3f& p,
@@ -41,7 +41,7 @@ public:
             const Eigen::Quaternionf& q,
             const Eigen::Vector3f& a_b,
             const Eigen::Vector3f& omega_b);
-
+    // Inserts relevant parts of the block-diagonal of the P matrix
     static Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE> makeP(
         const Eigen::Matrix3f& cov_pos,
         const Eigen::Matrix3f& cov_vel,
@@ -58,6 +58,8 @@ public:
     static Eigen::Vector3f quatToRotVec(const Eigen::Quaternionf& q);
     static Eigen::Matrix3f getSkew(const Eigen::Vector3f& in);
 
+
+
     // Acessors of nominal state
     inline Eigen::Vector3f getPos() { return nominalState_.block<3, 1>(POS_IDX, 0); }
     inline Eigen::Vector3f getVel() { return nominalState_.block<3, 1>(VEL_IDX, 0); }
@@ -67,7 +69,8 @@ public:
     inline Eigen::Vector3f getGyroBias() { return nominalState_.block<3, 1>(GB_IDX, 0); }
 
     // Called when there is a new measurment from the IMU.
-    void predictIMU(const Eigen::Vector3f& a_m, const Eigen::Vector3f& omega_m);
+    // dt is the integration time of this sample, nominally the IMU sample period
+    void predictIMU(const Eigen::Vector3f& a_m, const Eigen::Vector3f& omega_m, const float dt);
 
     // Called when there is a new measurment from an absolute position reference.
     // Note that this has no body offset, i.e. it assumes exact observation of the center of the IMU.
@@ -78,7 +81,7 @@ public:
     // pos_ref_body should specify the reference location in the body frame.
     // For example, this would be the location of the GPS antenna on the body.
     // NOT YET IMPLEMENTED
-    // void measurePosWithOffset(Eigen::Vector3f pos_meas, Matrix3f pos_covariance, 
+    // void measurePosWithOffset(Eigen::Vector3f pos_meas, Matrix3f pos_covariance,
     //        Eigen::Vector3f pos_ref_body);
 
     // Called when there is a new measurment from an absolute orientation reference.
@@ -86,6 +89,14 @@ public:
     void measureQuat(const Eigen::Quaternionf& q_meas, const Eigen::Matrix3f& theta_covariance);
 
     Eigen::Matrix3f getDCM();
+
+    enum delayTypes{
+        noMethod,           //apply updates  as if they are new.
+        applyUpdateToNew,   //Keep buffer of states, calculate what the update would have been, and apply to current state.
+        larsonAverageIMU,   //Method as described by Larson et al. Though a buffer of IMU values is kept, and a single update taking the average of these values is used.
+        larsonNewestIMU,    //As above, though no buffer kept, use most recent value as representing the average.
+        larsonFull          //As above, though the buffer is applied with the correct time steps, fully as described by Larson.
+    };
 
 private:
     Eigen::Matrix<float, 4, 3> getQ_dtheta(); // eqn 280, page 62
@@ -95,21 +106,24 @@ private:
         const Eigen::Matrix<float, 3, dSTATE_SIZE>& H);
     void injectErrorState(const Eigen::Matrix<float, dSTATE_SIZE, 1>& error_state);
 
-    // We assume a fixed dt, so we can precompute matrices
-    float dt_;
+    // IMU Noise values, used in prediction
+    float var_acc_;
+    float var_omega_;
+    float var_acc_bias_;
+    float var_omega_bias_;
     // Acceleration due to gravity in global frame
-    Eigen::Vector3f a_gravity_; // [m/s^2] 
+    Eigen::Vector3f a_gravity_; // [m/s^2]
     // State vector of the filter
     Eigen::Matrix<float, STATE_SIZE, 1> nominalState_;
     // Covariance of the (error) state
     Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE> P_;
-
-    // Process noise, stored as a vector of the diagonal
-    Eigen::Matrix<float, 4*3, 1> Q_diag_;
     // Jacobian of the state transition: page 59, eqn 269
     // Note that we precompute the static parts in the constructor,
-    // and only update the dynamic parts in the predict function
+    // and update the dynamic parts in the predict function
     Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE> F_x_;
+
+
+    int delayHandling_;
 };
 
-#endif //ESKF_H
+#endif /* ESKF_H */

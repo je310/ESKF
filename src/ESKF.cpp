@@ -1,37 +1,41 @@
-#include <ESKF.h>
+#include "ESKF.h"
+#include "unrolledFPFt.h"
+
+#define SQ(x) (x*x)
+#define I_3 (Eigen::Matrix3f::Identity())
+#define I_dx (Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>::Identity())
 
 using namespace Eigen;
 using namespace std;
 
-ESKF::ESKF(float delta_t, Vector3f a_gravity,
-        const Matrix<float, STATE_SIZE, 1>& initialState,
-        const Matrix<float, dSTATE_SIZE, dSTATE_SIZE>& initalP,
-        float var_a_n, float var_omega_n, float var_a_w, float var_omega_w)
-        : dt_(delta_t), a_gravity_(a_gravity),
+ESKF::ESKF(Eigen::Vector3f a_gravity,
+        const Eigen::Matrix<float, STATE_SIZE, 1>& initialState,
+        const Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>& initalP,
+        float var_acc, float var_omega, float var_acc_bias, float var_omega_bias,
+        int delayHandling)
+        : var_acc_(var_acc),
+        var_omega_(var_omega),
+        var_acc_bias_(var_acc_bias),
+        var_omega_bias_(var_omega_bias),
+        a_gravity_(a_gravity),
         nominalState_(initialState),
         P_(initalP) {
-    
+
     // Jacobian of the state transition: page 59, eqn 269
     // Precompute constant part only
     F_x_.setZero();
     // dPos row
     F_x_.block<3, 3>(dPOS_IDX, dPOS_IDX) = I_3;
-    F_x_.block<3, 3>(dPOS_IDX, dVEL_IDX) = I_3 * dt_;
     // dVel row
     F_x_.block<3, 3>(dVEL_IDX, dVEL_IDX) = I_3;
     // dTheta row
-    F_x_.block<3, 3>(dTHETA_IDX, dGB_IDX) = -I_3 * dt_;
-    // dGyroBias row
-    F_x_.block<3, 3>(dAB_IDX, dAB_IDX) = I_3;
     // dAccelBias row
+    F_x_.block<3, 3>(dAB_IDX, dAB_IDX) = I_3;
+    // dGyroBias row
     F_x_.block<3, 3>(dGB_IDX, dGB_IDX) = I_3;
 
-    // Precompute Q
-    Q_diag_ <<
-        (var_a_n*dt_*dt_     * I_3).diagonal(),
-        (var_omega_n*dt_*dt_ * I_3).diagonal(),
-        (var_a_w*dt_         * I_3).diagonal(),
-        (var_omega_w*dt_     * I_3).diagonal();
+    // how to handle delayed messurements.
+    delayHandling_ = delayHandling;
 }
 
 
@@ -107,7 +111,7 @@ Vector3f ESKF::quatToRotVec(const Quaternionf& q) {
     return angAx.angle() * angAx.axis();
 }
 
-void ESKF::predictIMU(const Vector3f& a_m, const Vector3f& omega_m) {
+void ESKF::predictIMU(const Vector3f& a_m, const Vector3f& omega_m, const float dt) {
     // DCM of current state
     Matrix3f Rot = getDCM();
     // Accelerometer measurement
@@ -115,35 +119,42 @@ void ESKF::predictIMU(const Vector3f& a_m, const Vector3f& omega_m) {
     Vector3f acc_global = Rot * acc_body;
     // Gyro measruement
     Vector3f omega = omega_m - getGyroBias();
-    Vector3f theta = omega * dt_;
-    Quaternionf q_theta = rotVecToQuat(theta);
-    Matrix3f R_theta = q_theta.toRotationMatrix();
+    Vector3f delta_theta = omega * dt;
+    Quaternionf q_delta_theta = rotVecToQuat(delta_theta);
+    Matrix3f R_delta_theta = q_delta_theta.toRotationMatrix();
 
     // Nominal state kinematics (eqn 259, pg 58)
-    Vector3f delta_pos = getVel()*dt_ + 0.5f*(acc_global + a_gravity_)*dt_*dt_;
+    Vector3f delta_pos = getVel()*dt + 0.5f*(acc_global + a_gravity_)*dt*dt;
     nominalState_.block<3, 1>(POS_IDX, 0) += delta_pos;
-    nominalState_.block<3, 1>(VEL_IDX, 0) += (acc_global + a_gravity_)*dt_;
-    nominalState_.block<4, 1>(QUAT_IDX, 0) = quatToHamilton(getQuat()*q_theta).normalized();
+    nominalState_.block<3, 1>(VEL_IDX, 0) += (acc_global + a_gravity_)*dt;
+    nominalState_.block<4, 1>(QUAT_IDX, 0) = quatToHamilton(getQuat()*q_delta_theta).normalized();
 
-    // Jacobian of the state transition (eqn 269, page 59)
-    // Update dynamic parts only
-    // dVel row
-    F_x_.block<3, 3>(dVEL_IDX, dTHETA_IDX) = -Rot * getSkew(acc_body) * dt_;
-    F_x_.block<3, 3>(dVEL_IDX, dAB_IDX) = -Rot * dt_;
-    // dTheta row
-    Vector3f delta_theta = omega * dt_;
-    F_x_.block<3, 3>(dTHETA_IDX, dTHETA_IDX) = R_theta.transpose();
+    // // Jacobian of the state transition (eqn 269, page 59)
+    // // Update dynamic parts only
+    // // dPos row
+    // F_x_.block<3, 3>(dPOS_IDX, dVEL_IDX).diagonal().fill(dt); // = I_3 * _dt
+    // // dVel row
+    // F_x_.block<3, 3>(dVEL_IDX, dTHETA_IDX) = -Rot * getSkew(acc_body) * dt;
+    // F_x_.block<3, 3>(dVEL_IDX, dAB_IDX) = -Rot * dt;
+    // // dTheta row
+    // F_x_.block<3, 3>(dTHETA_IDX, dTHETA_IDX) = R_delta_theta.transpose();
+    // F_x_.block<3, 3>(dTHETA_IDX, dGB_IDX).diagonal().fill(-dt); // = -I_3 * dt;
 
     // Predict P and inject variance (with diagonal optimization)
     // P_ = F_x_*P_*F_x_.transpose();
-    // Symmetric matrix optimization: Only evaluate lower triangular, then copy to upper
-    // This is not faster on a vectorizing machine, but on an embedded target it probably is.
-    // TODO: verify this!
-    P_.triangularView<Lower>() = F_x_ * P_.selfadjointView<Lower>() * F_x_.transpose();
-    P_ = P_.selfadjointView<Lower>();
 
-    P_.diagonal().block<4*3, 1>(dVEL_IDX, 0) += Q_diag_;
+    Matrix<float, dSTATE_SIZE, dSTATE_SIZE> Pnew;
+    unrolledFPFt(P_, Pnew, dt,
+        -Rot * getSkew(acc_body) * dt,
+        -Rot * dt,
+        R_delta_theta.transpose());
+    P_ = Pnew;
 
+    // Inject process noise
+    P_.diagonal().block<3, 1>(dVEL_IDX, 0).array() += var_acc_ * SQ(dt);
+    P_.diagonal().block<3, 1>(dTHETA_IDX, 0).array() += var_omega_ * SQ(dt);
+    P_.diagonal().block<3, 1>(dAB_IDX, 0).array() += var_acc_bias_ * dt;
+    P_.diagonal().block<3, 1>(dGB_IDX, 0).array() += var_omega_bias_ * dt;
 }
 
 // eqn 280, page 62
@@ -224,6 +235,6 @@ void ESKF::injectErrorState(const Matrix<float, dSTATE_SIZE, 1>& error_state) {\
     // Note that the document suggests that this step is optional
     // eqn 287, pg 63
     Matrix3f G_theta = I_3 - getSkew(0.5f * dtheta);
-    P_.block<3, 3>(dTHETA_IDX, dTHETA_IDX) = 
+    P_.block<3, 3>(dTHETA_IDX, dTHETA_IDX) =
             G_theta * P_.block<3, 3>(dTHETA_IDX, dTHETA_IDX) * G_theta.transpose();
 }
