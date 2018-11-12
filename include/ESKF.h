@@ -32,7 +32,7 @@ public:
             const Eigen::Matrix<float, STATE_SIZE, 1>& initialState,
             const Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>& initalP,
             float var_acc, float var_omega, float var_acc_bias, float var_omega_bias,
-            int delayHandling);
+            int delayHandling, int bufferL);
 
     // Concatenates relevant vectors to one large vector.
     static Eigen::Matrix<float, STATE_SIZE, 1> makeState(
@@ -124,6 +124,7 @@ private:
 
 
     int delayHandling_;
+    int bufferL_;
 };
 
 #endif /* ESKF_H */

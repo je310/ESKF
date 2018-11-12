@@ -12,7 +12,8 @@ ESKF::ESKF(Eigen::Vector3f a_gravity,
         const Eigen::Matrix<float, STATE_SIZE, 1>& initialState,
         const Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>& initalP,
         float var_acc, float var_omega, float var_acc_bias, float var_omega_bias,
-        int delayHandling)
+        int delayHandling,
+           int bufferL)
         : var_acc_(var_acc),
         var_omega_(var_omega),
         var_acc_bias_(var_acc_bias),
@@ -36,6 +37,7 @@ ESKF::ESKF(Eigen::Vector3f a_gravity,
 
     // how to handle delayed messurements.
     delayHandling_ = delayHandling;
+    bufferL_ = bufferL;
 }
 
 

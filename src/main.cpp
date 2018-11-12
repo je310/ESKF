@@ -5,13 +5,17 @@
 #include <geometry_msgs/PoseWithCovariance.h>
 #include <tf/transform_broadcaster.h>
 #include <math.h>
-
+#include <lightTime.h>
+#include <lightDuration.h>
 #define SQ(x) (x*x)
 #define GRAVITY 	9.812  // London g value.
 #define I_3 (Eigen::Matrix3f::Identity())
 
 using namespace Eigen;
 using namespace std;
+
+void postTF(ESKF eskf,tf::TransformBroadcaster tb,std::string name);
+double difference(ESKF eskfRef,ESKF eskfTest);
 
 int main(int argc, char** argv) {
 
@@ -55,7 +59,7 @@ int main(int argc, char** argv) {
             SQ(sigma_gyro),
             SQ(sigma_accel_drift),
             SQ(sigma_gyro_drift),
-            ESKF::delayTypes::noMethod);
+            ESKF::delayTypes::noMethod,100);
     ESKF eskfAsArrive(
             Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
             ESKF::makeState(
@@ -76,7 +80,7 @@ int main(int argc, char** argv) {
             SQ(sigma_gyro),
             SQ(sigma_accel_drift),
             SQ(sigma_gyro_drift),
-            ESKF::delayTypes::noMethod);
+            ESKF::delayTypes::noMethod,100);
     ESKF eskfAverageIMU(
             Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
             ESKF::makeState(
@@ -97,7 +101,7 @@ int main(int argc, char** argv) {
             SQ(sigma_gyro),
             SQ(sigma_accel_drift),
             SQ(sigma_gyro_drift),
-            ESKF::delayTypes::larsonAverageIMU);
+            ESKF::delayTypes::larsonAverageIMU,100);
     ESKF eskfNewIMU(
             Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
             ESKF::makeState(
@@ -118,7 +122,7 @@ int main(int argc, char** argv) {
             SQ(sigma_gyro),
             SQ(sigma_accel_drift),
             SQ(sigma_gyro_drift),
-            ESKF::delayTypes::larsonNewestIMU);
+            ESKF::delayTypes::larsonNewestIMU,100);
     ESKF eskfFullLarson(
             Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
             ESKF::makeState(
@@ -139,7 +143,7 @@ int main(int argc, char** argv) {
             SQ(sigma_gyro),
             SQ(sigma_accel_drift),
             SQ(sigma_gyro_drift),
-            ESKF::delayTypes::larsonFull);
+            ESKF::delayTypes::larsonFull,100);
     ESKF eskfUpdateToNew(
             Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
             ESKF::makeState(
@@ -160,7 +164,7 @@ int main(int argc, char** argv) {
             SQ(sigma_gyro),
             SQ(sigma_accel_drift),
             SQ(sigma_gyro_drift),
-            ESKF::delayTypes::applyUpdateToNew);
+            ESKF::delayTypes::applyUpdateToNew,100);
 
     // Start section that manages collecting data from files and feeding them to the ESKFs.
     // eskfSpoof is a special case that uses separated files for IMU and Mocap, it finds the next one based on timestamp (of data generration)
@@ -180,6 +184,9 @@ int main(int argc, char** argv) {
     int flag = 0;
     int spoofIMUcount = 0 ;
     int testIMUCount = 0;
+    double asArriveErrorAcc = 0;
+    double asArriveError  = 0;
+    LightTime<Time,LightDuration<Time>> time;
     while(!flag){
         imuData imu;
         mocapData mocap;
@@ -189,8 +196,12 @@ int main(int argc, char** argv) {
         //do spoof.
         flag = filesObj.getNextTimeCorrected(filesObj.readerMocap,filesObj.readerIMU,mocap,imu,type); // emulates lag free data
         if(type == isImuData){
+            static ros::Time oldTime;
+            ros::Duration diff = imu.stamp - oldTime;
+            oldTime = imu.stamp;
+            if(diff.toSec() > 1999) diff.fromSec(0.001);
             spoofIMUcount ++;
-            eskfSpoof.predictIMU(imu.accel, imu.gyro, 0.001);
+            eskfSpoof.predictIMU(imu.accel, imu.gyro, diff.toSec());
         }
 
         if(type == isMocapData){
@@ -214,7 +225,11 @@ int main(int argc, char** argv) {
         flag = filesObj.getNextNotCorrected(filesObj.readerMixed,mocap,imu,type);
         if(type == isImuData){
             testIMUCount ++;
-            eskfAsArrive.predictIMU(imu.accel, imu.gyro, 0.001);
+            static ros::Time oldTime;
+            ros::Duration diff = imu.stamp - oldTime;
+            oldTime = imu.stamp;
+            if(diff.toSec() > 1999) diff.fromSec(0.001);
+            eskfAsArrive.predictIMU(imu.accel, imu.gyro, diff.toSec());
         }
 
         if(type == isMocapData){
@@ -225,25 +240,32 @@ int main(int argc, char** argv) {
         }
 
         if(testIMUCount == spoofIMUcount){
-            tf::StampedTransform pred;
-            Vector3f pos = eskfSpoof.getPos();
-            Quaternionf quat = eskfSpoof.getQuat();
-            pred.setOrigin(tf::Vector3(pos[0],pos[1],pos[2]));
-            pred.setRotation(tf::Quaternion(quat.x(),quat.y(),quat.z(),quat.w()));
-            pred.stamp_ = ros::Time::now();
-            pred.frame_id_ = "mocha_world";
-            pred.child_frame_id_ = "pred";
-            tb.sendTransform(pred);
-            pos = eskfAsArrive.getPos();
-            quat = eskfAsArrive.getQuat();
-            pred.setOrigin(tf::Vector3(pos[0],pos[1],pos[2]));
-            pred.setRotation(tf::Quaternion(quat.x(),quat.y(),quat.z(),quat.w()));
-            pred.stamp_ = ros::Time::now();
-            pred.frame_id_ = "mocha_world";
-            pred.child_frame_id_ = "predAsArrive";
-            tb.sendTransform(pred);
+            postTF(eskfSpoof,tb,"spoof");
+            postTF(eskfAsArrive,tb,"asArrive");
+            asArriveErrorAcc += difference(eskfSpoof,eskfAsArrive);
         }
     }
+    asArriveError = asArriveErrorAcc / testIMUCount;
+    cout << "asArrive pos error average = " << asArriveError << endl;
 
 
+}
+
+double difference(ESKF eskfRef,ESKF eskfTest){
+    Vector3f posRef = eskfRef.getPos();
+    Vector3f posTest = eskfTest.getPos();
+    Vector3f out = posTest - posRef;
+    return out.norm();
+}
+
+void postTF(ESKF eskf,tf::TransformBroadcaster tb,std::string name){
+    tf::StampedTransform pred;
+    Vector3f pos = eskf.getPos();
+    Quaternionf quat = eskf.getQuat();
+    pred.setOrigin(tf::Vector3(pos[0],pos[1],pos[2]));
+    pred.setRotation(tf::Quaternion(quat.x(),quat.y(),quat.z(),quat.w()));
+    pred.stamp_ = ros::Time::now();
+    pred.frame_id_ = "mocha_world";
+    pred.child_frame_id_ = name;
+    tb.sendTransform(pred);
 }
