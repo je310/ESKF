@@ -6,6 +6,7 @@
 #include <Core.h>
 #include <Geometry.h>
 #include <iostream>
+#include <lTime.h>
 
 #define SUPPORT_STDIOSTREAM
 
@@ -70,11 +71,11 @@ public:
 
     // Called when there is a new measurment from the IMU.
     // dt is the integration time of this sample, nominally the IMU sample period
-    void predictIMU(const Eigen::Vector3f& a_m, const Eigen::Vector3f& omega_m, const float dt);
+    void predictIMU(const Eigen::Vector3f& a_m, const Eigen::Vector3f& omega_m, const float dt, lTime stamp);
 
     // Called when there is a new measurment from an absolute position reference.
     // Note that this has no body offset, i.e. it assumes exact observation of the center of the IMU.
-    void measurePos(const Eigen::Vector3f& pos_meas, const Eigen::Matrix3f& pos_covariance);
+    void measurePos(const Eigen::Vector3f& pos_meas, const Eigen::Matrix3f& pos_covariance, lTime stamp, lTime now);
 
     // Called when there is a new measurment from an absolute position reference.
     // The measurement is with respect to some location on the body that is not at the IMU center in general.
@@ -86,7 +87,7 @@ public:
 
     // Called when there is a new measurment from an absolute orientation reference.
     // The uncertianty is represented as the covariance of a rotation vector in the body frame
-    void measureQuat(const Eigen::Quaternionf& q_meas, const Eigen::Matrix3f& theta_covariance);
+    void measureQuat(const Eigen::Quaternionf& q_meas, const Eigen::Matrix3f& theta_covariance, lTime stamp, lTime now);
 
     Eigen::Matrix3f getDCM();
 
@@ -97,6 +98,11 @@ public:
         larsonNewestIMU,    //As above, though no buffer kept, use most recent value as representing the average.
         larsonFull          //As above, though the buffer is applied with the correct time steps, fully as described by Larson.
     };
+    struct imuMeasurement{
+        Eigen::Vector3f acc;
+        Eigen::Vector3f gyro;
+        lTime time;
+    };
 
 private:
     Eigen::Matrix<float, 4, 3> getQ_dtheta(); // eqn 280, page 62
@@ -105,6 +111,12 @@ private:
         const Eigen::Matrix3f& meas_covariance,
         const Eigen::Matrix<float, 3, dSTATE_SIZE>& H);
     void injectErrorState(const Eigen::Matrix<float, dSTATE_SIZE, 1>& error_state);
+
+    //get best time from history of state
+    int getClosestTime(std::vector<std::pair<lTime,Eigen::Matrix<float, STATE_SIZE, 1>>>* ptr, lTime stamp);
+
+    //get best time from history of imu
+    int getClosestTime(std::vector<imuMeasurement>*  ptr, lTime stamp);
 
     // IMU Noise values, used in prediction
     float var_acc_;
@@ -125,6 +137,14 @@ private:
 
     int delayHandling_;
     int bufferL_;
+    int recentPtr;
+    //pointers to structures that are allocated only after choosing a time delay handling method.
+    std::vector<std::pair<lTime,Eigen::Matrix<float, STATE_SIZE, 1>>>* stateHistoryPtr_;
+    std::vector<imuMeasurement>* imuHistoryPtr_;
+    imuMeasurement lastImu_;
+    lTime firstMeasTime;
+    lTime lastMeasurement;
+
 };
 
 #endif /* ESKF_H */

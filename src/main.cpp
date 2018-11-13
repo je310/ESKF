@@ -5,8 +5,7 @@
 #include <geometry_msgs/PoseWithCovariance.h>
 #include <tf/transform_broadcaster.h>
 #include <math.h>
-#include <lightTime.h>
-#include <lightDuration.h>
+#include <lTime.h>
 #define SQ(x) (x*x)
 #define GRAVITY 	9.812  // London g value.
 #define I_3 (Eigen::Matrix3f::Identity())
@@ -179,14 +178,22 @@ int main(int argc, char** argv) {
 
     tf::TransformBroadcaster tb;
 
-    DataFiles filesObj("../timeSeriesNov/gentleWave");
+    DataFiles filesObj("../timeSeriesNov/shakeWave");
 
     int flag = 0;
     int spoofIMUcount = 0 ;
     int testIMUCount = 0;
     double asArriveErrorAcc = 0;
     double asArriveError  = 0;
-    LightTime<Time,LightDuration<Time>> time;
+    double averageIMUErrorAcc = 0;
+    double averageIMUError  = 0;
+    double newIMUErrorAcc = 0;
+    double newIMUError  = 0;
+    double fullLarsonErrorAcc = 0;
+    double fullLarsonError  = 0;
+    double upToNewError = 0;
+    double upToNewErrorAcc =0;
+
     while(!flag){
         imuData imu;
         mocapData mocap;
@@ -199,15 +206,17 @@ int main(int argc, char** argv) {
             static ros::Time oldTime;
             ros::Duration diff = imu.stamp - oldTime;
             oldTime = imu.stamp;
+            lTime stamp(imu.stamp.sec,imu.stamp.nsec);
             if(diff.toSec() > 1999) diff.fromSec(0.001);
             spoofIMUcount ++;
-            eskfSpoof.predictIMU(imu.accel, imu.gyro, diff.toSec());
+            eskfSpoof.predictIMU(imu.accel, imu.gyro, diff.toSec(),stamp);
         }
 
         if(type == isMocapData){
-
-            eskfSpoof.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3);
-            eskfSpoof.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3);
+            lTime stamp(mocap.stamp.sec,mocap.stamp.nsec);
+            lTime now(mocap.receivedTime.sec,mocap.receivedTime.nsec);
+            eskfSpoof.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3,stamp,now);
+            eskfSpoof.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3,stamp,now);
 
 
             tf::StampedTransform meas;
@@ -228,25 +237,62 @@ int main(int argc, char** argv) {
             static ros::Time oldTime;
             ros::Duration diff = imu.stamp - oldTime;
             oldTime = imu.stamp;
+            lTime stamp(imu.stamp.sec,imu.stamp.nsec);
             if(diff.toSec() > 1999) diff.fromSec(0.001);
-            eskfAsArrive.predictIMU(imu.accel, imu.gyro, diff.toSec());
+            eskfAsArrive.predictIMU(imu.accel, imu.gyro, diff.toSec(),stamp);
+            eskfAverageIMU.predictIMU(imu.accel, imu.gyro, diff.toSec(),stamp);
+            eskfNewIMU.predictIMU(imu.accel, imu.gyro, diff.toSec(),stamp);
+            eskfFullLarson.predictIMU(imu.accel, imu.gyro, diff.toSec(),stamp);
+            eskfUpdateToNew.predictIMU(imu.accel, imu.gyro, diff.toSec(),stamp);
         }
 
         if(type == isMocapData){
 
-            eskfAsArrive.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3);
-            eskfAsArrive.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3);
+            lTime stamp(mocap.stamp.sec,mocap.stamp.nsec);
+
+            lTime now(mocap.receivedTime.sec,mocap.receivedTime.nsec);
+
+            eskfAsArrive.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3,stamp,now);
+            eskfAsArrive.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3,stamp,now);
+
+            eskfAverageIMU.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3,stamp,now);
+            eskfAverageIMU.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3,stamp,now);
+
+            eskfNewIMU.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3,stamp,now);
+            eskfNewIMU.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3,stamp,now);
+
+            eskfFullLarson.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3,stamp,now);
+            eskfFullLarson.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3,stamp,now);
+
+            eskfUpdateToNew.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3,stamp,now);
+            eskfUpdateToNew.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3,stamp,now);
         }
         }
 
         if(testIMUCount == spoofIMUcount){
             postTF(eskfSpoof,tb,"spoof");
             postTF(eskfAsArrive,tb,"asArrive");
+            postTF(eskfAverageIMU,tb,"amIMU");
+            postTF(eskfNewIMU,tb,"newIMU");
+            postTF(eskfFullLarson,tb,"Larson");
+            postTF(eskfUpdateToNew,tb,"UpToNew");
             asArriveErrorAcc += difference(eskfSpoof,eskfAsArrive);
+            averageIMUErrorAcc += difference(eskfSpoof,eskfAverageIMU);
+            newIMUErrorAcc += difference(eskfSpoof,eskfNewIMU);
+            fullLarsonErrorAcc += difference(eskfSpoof,eskfFullLarson);
+            upToNewErrorAcc += difference(eskfSpoof,eskfUpdateToNew);
         }
     }
     asArriveError = asArriveErrorAcc / testIMUCount;
+    averageIMUError = averageIMUErrorAcc / testIMUCount;
+    newIMUError = newIMUErrorAcc / testIMUCount;
+    fullLarsonError = fullLarsonErrorAcc / testIMUCount;
+    upToNewError = upToNewErrorAcc / testIMUCount;
     cout << "asArrive pos error average = " << asArriveError << endl;
+    cout << "averageIMUError pos error average = " << averageIMUError << endl;
+    cout << "newIMUError pos error average = " << newIMUError << endl;
+    cout << "fullLarsonError pos error average = " << fullLarsonError << endl;
+    cout << "upToNewError pos error average = " << upToNewError << endl;
 
 
 }

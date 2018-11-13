@@ -38,6 +38,29 @@ ESKF::ESKF(Eigen::Vector3f a_gravity,
     // how to handle delayed messurements.
     delayHandling_ = delayHandling;
     bufferL_ = bufferL;
+    recentPtr = 0;
+    firstMeasTime = lTime(INT32_MAX,INT32_MAX);
+
+    //handle time delay methods
+    if(delayHandling_ == larsonAverageIMU || delayHandling_ == larsonFull){
+        //init circular buffer for IMU
+        imuHistoryPtr_ = new  std::vector<imuMeasurement>(bufferL_);
+        for(int i = 0; i < bufferL; i++){
+            imuHistoryPtr_->at(i).time = lTime(0,0);
+        }
+    }
+    if(delayHandling_ == larsonNewestIMU){
+        //init newest value
+        lastImu_.time = lTime(0,0);
+    }
+    if(delayHandling_ == applyUpdateToNew){
+        //init circular buffer for state
+        stateHistoryPtr_ = new std::vector<std::pair<lTime,Eigen::Matrix<float, STATE_SIZE, 1>>>(bufferL_);
+        for(int i = 0; i < bufferL; i++){
+            stateHistoryPtr_->at(i).first = lTime(0,0);
+        }
+    }
+
 }
 
 
@@ -113,7 +136,27 @@ Vector3f ESKF::quatToRotVec(const Quaternionf& q) {
     return angAx.angle() * angAx.axis();
 }
 
-void ESKF::predictIMU(const Vector3f& a_m, const Vector3f& omega_m, const float dt) {
+void ESKF::predictIMU(const Vector3f& a_m, const Vector3f& omega_m, const float dt, lTime stamp) {
+
+    //handle time delay methods
+    if(delayHandling_ == larsonAverageIMU || delayHandling_ == larsonFull){
+        //store the imu data for later.
+        recentPtr ++;
+        imuMeasurement thisMeas;
+        thisMeas.time = stamp;
+        thisMeas.acc = a_m;
+        thisMeas.gyro = omega_m;
+        imuHistoryPtr_->at(recentPtr%bufferL_) = thisMeas;
+    }
+    if(delayHandling_ == larsonNewestIMU){
+        //store only the newest imu
+        imuMeasurement thisMeas;
+        thisMeas.time = stamp;
+        thisMeas.acc = a_m;
+        thisMeas.gyro = omega_m;
+        lastImu_ = thisMeas;
+    }
+
     // DCM of current state
     Matrix3f Rot = getDCM();
     // Accelerometer measurement
@@ -130,6 +173,15 @@ void ESKF::predictIMU(const Vector3f& a_m, const Vector3f& omega_m, const float 
     nominalState_.block<3, 1>(POS_IDX, 0) += delta_pos;
     nominalState_.block<3, 1>(VEL_IDX, 0) += (acc_global + a_gravity_)*dt;
     nominalState_.block<4, 1>(QUAT_IDX, 0) = quatToHamilton(getQuat()*q_delta_theta).normalized();
+
+    if(delayHandling_ == applyUpdateToNew){
+        //store state for later.
+        recentPtr ++;
+        std::pair<lTime,Eigen::Matrix<float, STATE_SIZE, 1>> thisState;
+        thisState.first = stamp;
+        thisState.second = nominalState_;
+        stateHistoryPtr_->at(recentPtr%bufferL_) = thisState;
+    }
 
     // // Jacobian of the state transition (eqn 269, page 59)
     // // Update dynamic parts only
@@ -176,9 +228,66 @@ Matrix<float, 4, 3> ESKF::getQ_dtheta() {
     return Q_dtheta;
 }
 
-void ESKF::measurePos(const Vector3f& pos_meas, const Matrix3f& pos_covariance) {
-    // delta measurement is trivial
-    Vector3f delta_pos = pos_meas - getPos();
+//get best time from history of state
+int ESKF::getClosestTime(std::vector<std::pair<lTime,Eigen::Matrix<float, STATE_SIZE, 1>>>* ptr, lTime stamp){
+    //we find the first time in the history that is older, or take the oldest one if the buffer does not extend far enough
+    int complete = 0;
+    int index = recentPtr;
+    while(!complete){
+        if(ptr->at(index%bufferL_).first <= stamp){
+            if(!ptr->at(index%bufferL_).first.isZero()) return index%bufferL_;
+
+            else{
+                return recentPtr%bufferL_;
+            }
+
+        }
+        index --; // scroll back in time.
+        if(index <= recentPtr - bufferL_) complete =1;
+    }
+    return recentPtr%bufferL_;
+}
+
+//get best time from history of imu
+int ESKF::getClosestTime(std::vector<imuMeasurement>*  ptr, lTime stamp){
+    //we find the first time in the history that is older, or take the oldest one if the buffer does not extend far enough
+    int complete = 0;
+    int index = recentPtr;
+    while(!complete){
+        if(ptr->at(index%bufferL_).time <= stamp){
+            if(!ptr->at(index%bufferL_).time.isZero()) return index%bufferL_;
+
+            else{
+                return recentPtr%bufferL_;
+            }
+
+        }
+        index --; // scroll back in time.
+        if(index <= recentPtr - bufferL_) complete =1;
+    }
+    return recentPtr%bufferL_;
+}
+
+
+void ESKF::measurePos(const Vector3f& pos_meas, const Matrix3f& pos_covariance,lTime stamp ,lTime now) {
+    // delta measurement
+    if(firstMeasTime == lTime(INT32_MAX,INT32_MAX)) firstMeasTime = now;
+
+    Vector3f delta_pos;
+    if(delayHandling_ == noMethod){
+        delta_pos = pos_meas - getPos();
+        cout << "noMethod delta Pos: "<< delta_pos <<endl;
+    }
+    if(delayHandling_ == applyUpdateToNew ){
+        if(lastMeasurement < stateHistoryPtr_->at((recentPtr + 1)%bufferL_).first) firstMeasTime = now;
+        if(stamp > firstMeasTime){
+        int bestTimeIndex = getClosestTime(stateHistoryPtr_,stamp);
+        delta_pos = pos_meas - stateHistoryPtr_->at(bestTimeIndex).second.block<3, 1>(POS_IDX, 0);
+        }
+        else delta_pos = pos_meas - getPos();
+        cout << "UpToNew Pos: "<< delta_pos <<endl;
+    }
+    lastMeasurement = now;
     // H is a trivial observation of purely the position
     Matrix<float, 3, dSTATE_SIZE> H;
     H.setZero();
@@ -188,12 +297,23 @@ void ESKF::measurePos(const Vector3f& pos_meas, const Matrix3f& pos_covariance) 
     update_3D(delta_pos, pos_covariance, H);
 }
 
-void ESKF::measureQuat(const Quaternionf& q_gb_meas, const Matrix3f& theta_covariance) {
+void ESKF::measureQuat(const Quaternionf& q_gb_meas, const Matrix3f& theta_covariance, lTime stamp ,lTime now) {
     // Transform the quaternion measurement to a measurement of delta_theta:
     // a rotation in the body frame from nominal to measured.
     // This is identical to the form of dtheta in the error_state,
     // so this becomes a trivial measurement of dtheta.
+    if(firstMeasTime == lTime(INT32_MAX,INT32_MAX)) firstMeasTime = now;
     Quaternionf q_gb_nominal = getQuat();
+    if(delayHandling_ == noMethod){
+        q_gb_nominal = getQuat();
+    }
+    if(delayHandling_ == applyUpdateToNew){
+        if(stamp > firstMeasTime){
+        int bestTimeIndex = getClosestTime(stateHistoryPtr_,stamp);
+        q_gb_nominal = quatFromHamilton(stateHistoryPtr_->at(bestTimeIndex).second.block<4, 1>(QUAT_IDX, 0));
+        }
+        else q_gb_nominal = getQuat();
+    }
     Quaternionf q_bNominal_bMeas = q_gb_nominal.conjugate() * q_gb_meas;
     Vector3f delta_theta = quatToRotVec(q_bNominal_bMeas);
     // Because of the above construction, H is a trivial observation of dtheta
