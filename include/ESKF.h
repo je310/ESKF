@@ -2,7 +2,7 @@
 #define ESKF_H
 
 // Malloc is really bad on embedded platform
-#define EIGEN_NO_MALLOC
+//#define EIGEN_NO_MALLOC
 #include <Core.h>
 #include <Geometry.h>
 #include <iostream>
@@ -106,10 +106,9 @@ public:
 
 private:
     Eigen::Matrix<float, 4, 3> getQ_dtheta(); // eqn 280, page 62
-    void update_3D(
-        const Eigen::Vector3f& delta_measurement,
+    void update_3D(const Eigen::Vector3f& delta_measurement,
         const Eigen::Matrix3f& meas_covariance,
-        const Eigen::Matrix<float, 3, dSTATE_SIZE>& H);
+        const Eigen::Matrix<float, 3, dSTATE_SIZE>& H, lTime stamp, lTime now);
     void injectErrorState(const Eigen::Matrix<float, dSTATE_SIZE, 1>& error_state);
 
     //get best time from history of state
@@ -117,6 +116,7 @@ private:
 
     //get best time from history of imu
     int getClosestTime(std::vector<imuMeasurement>*  ptr, lTime stamp);
+    imuMeasurement getAverageIMU(lTime stamp);
 
     // IMU Noise values, used in prediction
     float var_acc_;
@@ -140,10 +140,12 @@ private:
     int recentPtr;
     //pointers to structures that are allocated only after choosing a time delay handling method.
     std::vector<std::pair<lTime,Eigen::Matrix<float, STATE_SIZE, 1>>>* stateHistoryPtr_;
+    std::vector<std::pair<lTime,Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>>>* PHistoryPtr_;
     std::vector<imuMeasurement>* imuHistoryPtr_;
     imuMeasurement lastImu_;
     lTime firstMeasTime;
     lTime lastMeasurement;
+    Eigen::Matrix<float, dSTATE_SIZE, dSTATE_SIZE>* Mptr;
 
 };
 

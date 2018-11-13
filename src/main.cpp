@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
 
     tf::TransformBroadcaster tb;
 
-    DataFiles filesObj("../timeSeriesNov/shakeWave");
+    DataFiles filesObj("../timeSeriesNov/hardConWave");
 
     int flag = 0;
     int spoofIMUcount = 0 ;
@@ -272,7 +272,7 @@ int main(int argc, char** argv) {
         if(testIMUCount == spoofIMUcount){
             postTF(eskfSpoof,tb,"spoof");
             postTF(eskfAsArrive,tb,"asArrive");
-            postTF(eskfAverageIMU,tb,"amIMU");
+            postTF(eskfAverageIMU,tb,"avIMU");
             postTF(eskfNewIMU,tb,"newIMU");
             postTF(eskfFullLarson,tb,"Larson");
             postTF(eskfUpdateToNew,tb,"UpToNew");
