@@ -18,19 +18,19 @@ double difference(ESKF eskfRef,ESKF eskfTest);
 
 int main(int argc, char** argv) {
 
-    float sigma_accel = 0.124; // [m/s^2]  (value derived from Noise Spectral Density in datasheet)
-    float sigma_gyro = 0.00276; // [rad/s] (value derived from Noise Spectral Density in datasheet)
+    float sigma_accel = 0.00124; // [m/s^2]  (value derived from Noise Spectral Density in datasheet)
+    float sigma_gyro = 0.276; // [rad/s] (value derived from Noise Spectral Density in datasheet)
     float sigma_accel_drift = 0.001f*sigma_accel; // [m/s^2 sqrt(s)] (Educated guess, real value to be measured)
     float sigma_gyro_drift = 0.001f*sigma_gyro; // [rad/s sqrt(s)] (Educated guess, real value to be measured)
 
     float sigma_init_pos = 1.0; // [m]
     float sigma_init_vel = 0.1; // [m/s]
     float sigma_init_dtheta = 1.0; // [rad]
-    float sigma_init_accel_bias = 1000*sigma_accel_drift; // [m/s^2]
-    float sigma_init_gyro_bias = 1000*sigma_gyro_drift; // [rad/s]
+    float sigma_init_accel_bias = 10*sigma_accel_drift; // [m/s^2]
+    float sigma_init_gyro_bias = 10*sigma_gyro_drift; // [rad/s]
 
-    float sigma_mocap_pos = 0.0003; // [m]
-    float sigma_mocap_rot = 0.003; // [rad]
+    float sigma_mocap_pos = 0.003; // [m]
+    float sigma_mocap_rot = 0.03; // [rad]
     //initialise many ESKF's for testing:
     // eskfSpoof - Will be fed data as if there is no lag, this is the comparison case
     // eskfAsArrive - No time correction method used, just fed lagged data.
@@ -41,11 +41,11 @@ int main(int argc, char** argv) {
     ESKF eskfSpoof(
             Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
             ESKF::makeState(
-                Vector3f(0, 0, 0), // init pos
-                Vector3f(0, 0, 0), // init vel
-                Quaternionf(AngleAxisf(0.5f, Vector3f(1, 0, 0))), // init quaternion
-                Vector3f(0, 0, 0), // init accel bias
-                Vector3f(0, 0, 0) // init gyro bias
+                    Vector3f(0, 0, 1), // init pos
+                    Vector3f(0, 0, 0), // init vel
+                    Quaternionf(AngleAxisf(0.0f, Vector3f(0, 0, 1))), // init quaternion
+                        Vector3f(-1.26, -1.09, -1.977), // init accel bias
+                        Vector3f(0.114, -0.01, 0) // init gyro bias
             ),
             ESKF::makeP(
                 SQ(sigma_init_pos) * I_3,
@@ -62,11 +62,11 @@ int main(int argc, char** argv) {
     ESKF eskfAsArrive(
             Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
             ESKF::makeState(
-                Vector3f(0, 0, 0), // init pos
-                Vector3f(0, 0, 0), // init vel
-                Quaternionf(AngleAxisf(0.5f, Vector3f(1, 0, 0))), // init quaternion
-                Vector3f(0, 0, 0), // init accel bias
-                Vector3f(0, 0, 0) // init gyro bias
+                    Vector3f(0, 0, 1), // init pos
+                    Vector3f(0, 0, 0), // init vel
+                    Quaternionf(AngleAxisf(0.0f, Vector3f(0, 0, 1))), // init quaternion
+                        Vector3f(-1.26, -1.09, -1.977), // init accel bias
+                        Vector3f(0.114, -0.01, 0) // init gyro bias
             ),
             ESKF::makeP(
                 SQ(sigma_init_pos) * I_3,
@@ -80,77 +80,15 @@ int main(int argc, char** argv) {
             SQ(sigma_accel_drift),
             SQ(sigma_gyro_drift),
             ESKF::delayTypes::noMethod,100);
-    ESKF eskfAverageIMU(
-            Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
-            ESKF::makeState(
-                Vector3f(0, 0, 0), // init pos
-                Vector3f(0, 0, 0), // init vel
-                Quaternionf(AngleAxisf(0.5f, Vector3f(1, 0, 0))), // init quaternion
-                Vector3f(0, 0, 0), // init accel bias
-                Vector3f(0, 0, 0) // init gyro bias
-            ),
-            ESKF::makeP(
-                SQ(sigma_init_pos) * I_3,
-                SQ(sigma_init_vel) * I_3,
-                SQ(sigma_init_dtheta) * I_3,
-                SQ(sigma_init_accel_bias) * I_3,
-                SQ(sigma_init_gyro_bias) * I_3
-            ),
-            SQ(sigma_accel),
-            SQ(sigma_gyro),
-            SQ(sigma_accel_drift),
-            SQ(sigma_gyro_drift),
-            ESKF::delayTypes::larsonAverageIMU,100);
-    ESKF eskfNewIMU(
-            Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
-            ESKF::makeState(
-                Vector3f(0, 0, 0), // init pos
-                Vector3f(0, 0, 0), // init vel
-                Quaternionf(AngleAxisf(0.5f, Vector3f(1, 0, 0))), // init quaternion
-                Vector3f(0, 0, 0), // init accel bias
-                Vector3f(0, 0, 0) // init gyro bias
-            ),
-            ESKF::makeP(
-                SQ(sigma_init_pos) * I_3,
-                SQ(sigma_init_vel) * I_3,
-                SQ(sigma_init_dtheta) * I_3,
-                SQ(sigma_init_accel_bias) * I_3,
-                SQ(sigma_init_gyro_bias) * I_3
-            ),
-            SQ(sigma_accel),
-            SQ(sigma_gyro),
-            SQ(sigma_accel_drift),
-            SQ(sigma_gyro_drift),
-            ESKF::delayTypes::larsonNewestIMU,100);
-    ESKF eskfFullLarson(
-            Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
-            ESKF::makeState(
-                Vector3f(0, 0, 0), // init pos
-                Vector3f(0, 0, 0), // init vel
-                Quaternionf(AngleAxisf(0.5f, Vector3f(1, 0, 0))), // init quaternion
-                Vector3f(0, 0, 0), // init accel bias
-                Vector3f(0, 0, 0) // init gyro bias
-            ),
-            ESKF::makeP(
-                SQ(sigma_init_pos) * I_3,
-                SQ(sigma_init_vel) * I_3,
-                SQ(sigma_init_dtheta) * I_3,
-                SQ(sigma_init_accel_bias) * I_3,
-                SQ(sigma_init_gyro_bias) * I_3
-            ),
-            SQ(sigma_accel),
-            SQ(sigma_gyro),
-            SQ(sigma_accel_drift),
-            SQ(sigma_gyro_drift),
-            ESKF::delayTypes::larsonFull,100);
+
     ESKF eskfUpdateToNew(
             Vector3f(0, 0, -GRAVITY), // Acceleration due to gravity in global frame
             ESKF::makeState(
-                Vector3f(0, 0, 0), // init pos
-                Vector3f(0, 0, 0), // init vel
-                Quaternionf(AngleAxisf(0.5f, Vector3f(1, 0, 0))), // init quaternion
-                Vector3f(0, 0, 0), // init accel bias
-                Vector3f(0, 0, 0) // init gyro bias
+                    Vector3f(0, 0, 1), // init pos
+                    Vector3f(0, 0, 0), // init vel
+                    Quaternionf(AngleAxisf(0.0f, Vector3f(0, 0, 1))), // init quaternion
+                        Vector3f(-1.26, -1.09, -1.977), // init accel bias
+                        Vector3f(0.114, -0.01, 0) // init gyro bias
             ),
             ESKF::makeP(
                 SQ(sigma_init_pos) * I_3,
@@ -178,21 +116,20 @@ int main(int argc, char** argv) {
 
     tf::TransformBroadcaster tb;
 
-    DataFiles filesObj("../timeSeriesNov/hardConWave");
+    DataFiles filesObj("../timeSeries/hardWave");
 
     int flag = 0;
     int spoofIMUcount = 0 ;
     int testIMUCount = 0;
+    int mocapCount = 0;
     double asArriveErrorAcc = 0;
     double asArriveError  = 0;
-    double averageIMUErrorAcc = 0;
-    double averageIMUError  = 0;
-    double newIMUErrorAcc = 0;
-    double newIMUError  = 0;
-    double fullLarsonErrorAcc = 0;
-    double fullLarsonError  = 0;
+    double asArriveLargestError = 0;
     double upToNewError = 0;
     double upToNewErrorAcc =0;
+    double upToNewLargestError = 0;
+    double asArriveErrorAccSqu = 0;
+    double upToNewErrorAccSqu = 0;
 
     while(!flag){
         imuData imu;
@@ -226,7 +163,6 @@ int main(int argc, char** argv) {
             meas.frame_id_ = "mocha_world";
             meas.child_frame_id_ = "meas";
             tb.sendTransform(meas);
-            cout << "mocap" << endl;
         }
         }
         else{
@@ -240,9 +176,6 @@ int main(int argc, char** argv) {
             lTime stamp(imu.stamp.sec,imu.stamp.nsec);
             if(diff.toSec() > 1999) diff.fromSec(0.001);
             eskfAsArrive.predictIMU(imu.accel, imu.gyro, diff.toSec(),stamp);
-            eskfAverageIMU.predictIMU(imu.accel, imu.gyro, diff.toSec(),stamp);
-            eskfNewIMU.predictIMU(imu.accel, imu.gyro, diff.toSec(),stamp);
-            eskfFullLarson.predictIMU(imu.accel, imu.gyro, diff.toSec(),stamp);
             eskfUpdateToNew.predictIMU(imu.accel, imu.gyro, diff.toSec(),stamp);
         }
 
@@ -252,17 +185,11 @@ int main(int argc, char** argv) {
 
             lTime now(mocap.receivedTime.sec,mocap.receivedTime.nsec);
 
+            mocapCount++ ;
+
             eskfAsArrive.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3,stamp,now);
             eskfAsArrive.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3,stamp,now);
 
-            eskfAverageIMU.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3,stamp,now);
-            eskfAverageIMU.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3,stamp,now);
-
-            eskfNewIMU.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3,stamp,now);
-            eskfNewIMU.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3,stamp,now);
-
-            eskfFullLarson.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3,stamp,now);
-            eskfFullLarson.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3,stamp,now);
 
             eskfUpdateToNew.measurePos(mocap.pos, SQ(sigma_mocap_pos)*I_3,stamp,now);
             eskfUpdateToNew.measureQuat(mocap.quat, SQ(sigma_mocap_rot)*I_3,stamp,now);
@@ -272,27 +199,31 @@ int main(int argc, char** argv) {
         if(testIMUCount == spoofIMUcount){
             postTF(eskfSpoof,tb,"spoof");
             postTF(eskfAsArrive,tb,"asArrive");
-            postTF(eskfAverageIMU,tb,"avIMU");
-            postTF(eskfNewIMU,tb,"newIMU");
-            postTF(eskfFullLarson,tb,"Larson");
             postTF(eskfUpdateToNew,tb,"UpToNew");
-            asArriveErrorAcc += difference(eskfSpoof,eskfAsArrive);
-            averageIMUErrorAcc += difference(eskfSpoof,eskfAverageIMU);
-            newIMUErrorAcc += difference(eskfSpoof,eskfNewIMU);
-            fullLarsonErrorAcc += difference(eskfSpoof,eskfFullLarson);
-            upToNewErrorAcc += difference(eskfSpoof,eskfUpdateToNew);
+            double asArriveEr = difference(eskfSpoof,eskfAsArrive);
+            double upToNewEr = difference(eskfSpoof,eskfUpdateToNew);
+
+            if(mocapCount > 100){   // stop max error just being the initialisation error
+                asArriveErrorAcc += asArriveEr;
+                upToNewErrorAcc += upToNewEr;
+                asArriveErrorAccSqu += pow(asArriveEr,2);
+                upToNewErrorAccSqu += pow(upToNewEr,2);
+                if( asArriveEr > asArriveLargestError) asArriveLargestError = asArriveEr;
+                if( upToNewEr > upToNewLargestError) upToNewLargestError = upToNewEr;
+            }
         }
     }
-    asArriveError = asArriveErrorAcc / testIMUCount;
-    averageIMUError = averageIMUErrorAcc / testIMUCount;
-    newIMUError = newIMUErrorAcc / testIMUCount;
-    fullLarsonError = fullLarsonErrorAcc / testIMUCount;
-    upToNewError = upToNewErrorAcc / testIMUCount;
+    asArriveError = asArriveErrorAcc / (testIMUCount-100);
+    upToNewError = upToNewErrorAcc / (testIMUCount-100);
+    Vector3f accelBias = eskfUpdateToNew.getAccelBias();
+    Vector3f gyroBias = eskfUpdateToNew.getGyroBias();
+    cout << "accelBias" << accelBias << endl << "  gyroBias "<< gyroBias << endl;
     cout << "asArrive pos error average = " << asArriveError << endl;
-    cout << "averageIMUError pos error average = " << averageIMUError << endl;
-    cout << "newIMUError pos error average = " << newIMUError << endl;
-    cout << "fullLarsonError pos error average = " << fullLarsonError << endl;
-    cout << "upToNewError pos error average = " << upToNewError << endl;
+    cout << "asArrive largest error = " << asArriveLargestError << endl;
+    cout << "asArrive varience error = " <<  asArriveErrorAccSqu/((testIMUCount-100)) - pow(asArriveError,2)<< endl;
+    cout << "upToNew pos error average = " << upToNewError << endl;
+    cout << "upToNew largest error = " << upToNewLargestError << endl;
+    cout << "upToNew varience error = " << upToNewErrorAccSqu/((testIMUCount-100)) - pow(upToNewError,2)  << endl;
 
 
 }

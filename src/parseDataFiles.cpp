@@ -95,6 +95,7 @@ int DataFiles::getNextTimeCorrected(ifstream &mocapFile,ifstream &imuFile,mocapD
         primed = 1;
         error = getNext(mocapFile,mocapTemp,imuTemp, typeTemp);
         error += getNext(imuFile,mocapTemp,imuTemp, typeTemp);
+
         ros::Duration dur = imuTemp.stamp - mocapTemp.stamp + hack;
         if(dur.toSec() >= 0){
             typeTemp = isMocapData;
@@ -129,6 +130,54 @@ int DataFiles::getNextTimeCorrected(ifstream &mocapFile,ifstream &imuFile,mocapD
         return error;
     }
 
+}
+
+int DataFiles::getNextTimeReceived(ifstream &mocapFile,ifstream &imuFile,mocapData &mocap,imuData &imu,int &type){
+
+    static mocapData mocapTemp;
+    static imuData imuTemp;
+    static int primed = 0;
+    int typeTemp;
+    int error = 0;
+    ros::Duration hack(0);
+    if(!primed){
+        primed = 1;
+        error = getNext(mocapFile,mocapTemp,imuTemp, typeTemp);
+        error += getNext(imuFile,mocapTemp,imuTemp, typeTemp);
+
+        ros::Duration dur = imuTemp.stamp - mocapTemp.receivedTime + hack;
+        if(dur.toSec() >= 0){
+            typeTemp = isMocapData;
+        }
+        else{
+            typeTemp = isImuData;
+        }
+        mocap = mocapTemp;
+        imu = imuTemp;
+        type = typeTemp;
+        return error;
+    }
+    else{
+        //the oldest one would have been sent, update the other one.
+        ros::Duration dur = imuTemp.stamp - mocapTemp.receivedTime + hack;
+        if(dur.toSec() >= 0){
+             error = getNext(mocapFile,mocapTemp,imuTemp, typeTemp);
+        }
+        else{
+            error = getNext(imuFile,mocapTemp,imuTemp, typeTemp);
+        }
+        dur = imuTemp.stamp - mocapTemp.receivedTime + hack;
+        if(dur.toSec() >= 0){
+            typeTemp = isMocapData;
+        }
+        else{
+            typeTemp = isImuData;
+        }
+        mocap = mocapTemp;
+        imu = imuTemp;
+        type = typeTemp;
+        return error;
+    }
 }
 
 int DataFiles::getNextNotCorrected(ifstream &mixedFile,mocapData &mocap,imuData &imu,int &type){

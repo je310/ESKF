@@ -43,6 +43,7 @@ public:
     int getNext(ifstream &file, mocapData &mocap, imuData &imu, int &type);
     int getNextTimeCorrected(ifstream &mocapFile, ifstream &imuFile, mocapData &mocap, imuData &imu, int &type);
     int getNextNotCorrected(ifstream &mixedFile,mocapData &mocap,imuData &imu,int &type);
+    int getNextTimeReceived(ifstream &mocapFile,ifstream &imuFile,mocapData &mocap,imuData &imu,int &type);
 
 };
 
